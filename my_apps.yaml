@@ -1,0 +1,58 @@
+douyin:
+  headers:
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
+      (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
+    Referer: https://www.douyin.com/
+  cookie: SEARCH_RESULT_LIST_TYPE=%22single%22; hevc_supported=true; enter_pc_once=1; UIFID=28ea90c1b0cf804752225259882c701fb12323f08ef828fc1032b615e29efbbe7d91db1a87ccff7dae4b5559aa4ccf907ad807459a587acdff925fcedcee915cd8750c3fb5143d1e8a49ffa4a93c1dc5a2ca8abfbd21bb0da1894b3c5135ae7f25459e1def2d2652a1a3931ec914aa6bd97c0e51d59afbcc5916e04d9b94a35e38e18a5b6926f25bb16b34bef5809072fc932c3442b08697aac839d36a0c70d2; volume_info=%7B%22isUserMute%22%3Afalse%2C%22isMute%22%3Afalse%2C%22volume%22%3A0.832%7D; is_dash_user=1; bd_ticket_guard_client_web_domain=2; passport_csrf_token=82fc3851ada194d6757ce29a535782ae; passport_csrf_token_default=82fc3851ada194d6757ce29a535782ae; record_force_login=%7B%22timestamp%22%3A1768874473815%2C%22force_login_video%22%3A21%2C%22force_login_live%22%3A0%2C%22force_login_direct_video%22%3A0%7D; SEARCH_UN_LOGIN_PV_CURR_DAY=%7B%22date%22%3A1768977916978%2C%22count%22%3A1%7D; strategyABtestKey=%221768977926.941%22; ttwid=1%7Cuc3B8Qankdac1YgXaE9kmArxgFmiOvelNxJqVqp-aWU%7C1768977929%7Cdd5e8223726c7596609f1e72585777e4b6c265bc21d0850b7b6910700b2d4b19; download_guide=%222%2F20260121%2F1%22; d_ticket=1d85c02490db0a698fcfe0237a444ea6e906e; passport_mfa_token=CjXOO%2FKrc6v6tktq2lnTRgSu5jpsATaA1wEGZfnfVh4tHphsLVVb8b2wAQ7ec6%2FIWntYh8r53xpKCjwAAAAAAAAAAAAAT%2FoAyu0HYG6KaR4drQFKoiFYiSR64EdlODNMfGB8m1F6Fgz%2FBrpURbq7uRFLwKNiFwkQ1L2HDhj2sdFsIAIiAQNT7yEX; passport_assist_user=CjxtbewdMq2jaItT13zFYXL_yA9KoQ5fJirXgadFt20WgG91p8MrdgVksfR8xdDJld34zdZwSSEXbi4QTm4aSgo8AAAAAAAAAAAAAE_6r2ROYdtLZjPiCWKt72vivkWqiXAl4PWhHzAWPIIKBwnw3isza465NvUZVky_JpAJENm-hw4Yia_WVCABIgEDW2mspw%3D%3D; n_mh=vRFDWT7oDaKzDnziDsCbw8fqimSl69OZQtPxLX3_-rU; passport_auth_status=c64383dc97273e521de1fbea08e51cf1%2C; passport_auth_status_ss=c64383dc97273e521de1fbea08e51cf1%2C; sid_guard=72c78697fa40b539777577fb9593727a%7C1768978350%7C5184000%7CSun%2C+22-Mar-2026+06%3A52%3A30+GMT; uid_tt=bf018f9c2b15427095086ce91fe1a8be; uid_tt_ss=bf018f9c2b15427095086ce91fe1a8be; sid_tt=72c78697fa40b539777577fb9593727a; sessionid=72c78697fa40b539777577fb9593727a; sessionid_ss=72c78697fa40b539777577fb9593727a; session_tlb_tag=sttt%7C13%7CcseGl_pAtTl3dXf7lZNyev________--8h_7t6G6RN8Sho0p_auyR2RCNxEOUaunEx9z5Rn09To%3D; is_staff_user=false; sid_ucp_v1=1.0.0-KDQ2ZjUyMTU0YzhkZGE4ZDY3ZmI4M2QzZDRjZjkwNzQxN2E3NTliZDIKHwjzsufV2wEQru_BywYY7zEgDDDW-ajHBTgCQPEHSAQaAmxxIiA3MmM3ODY5N2ZhNDBiNTM5Nzc3NTc3ZmI5NTkzNzI3YQ; ssid_ucp_v1=1.0.0-KDQ2ZjUyMTU0YzhkZGE4ZDY3ZmI4M2QzZDRjZjkwNzQxN2E3NTliZDIKHwjzsufV2wEQru_BywYY7zEgDDDW-ajHBTgCQPEHSAQaAmxxIiA3MmM3ODY5N2ZhNDBiNTM5Nzc3NTc3ZmI5NTkzNzI3YQ; _bd_ticket_crypt_cookie=0652f095fa4d7fb770e78512f2f6d1c9; __security_mc_1_s_sdk_sign_data_key_web_protect=3e40fef9-4566-94fc; __security_mc_1_s_sdk_cert_key=1f778f17-4bec-a951; __security_mc_1_s_sdk_crypt_sdk=c9af147f-4fae-9e67; __security_server_data_status=1; login_time=1768978350562; publish_badge_show_info=%220%2C0%2C0%2C1768978351232%22; DiscoverFeedExposedAd=%7B%7D; SelfTabRedDotControl=%5B%5D; FOLLOW_NUMBER_YELLOW_POINT_INFO=%22MS4wLjABAAAAU2PjfUY8FUtYSv36mLuJ_P8F3am0yqGGWfaQnBBc3Ec%2F1769011200000%2F0%2F1768978356124%2F0%22; biz_trace_id=1ac53463; odin_tt=46812e17229b8e9d61f2965a1f28690676afcd5e5a788c55067285420fd0f0246d177e9e3b2fb6d7f5df11d124d31478; bd_ticket_guard_client_data_v2=eyJyZWVfcHVibGljX2tleSI6IkJHT3B2eGpTZ3pUS3pObkx3Y1puU0x2MFJyZE51TEpLb0MwRkErZnphcHRtU0F1elBkRUtLa1lvY2w1elE4djZNbFgyMDY0NkVhQklORjFVbkl1Z2JvOD0iLCJ0c19zaWduIjoidHMuMi4xZTEyNzdhM2Y3NzYxZTJiZmIxNDllOTAwMDRhYTY3NDU3Mjg5NDU5ZDZmNTYxOTlmMTA0Zjk0OTYxOTdlYmMyYzRmYmU4N2QyMzE5Y2YwNTMxODYyNGNlZGExNDkxMWNhNDA2ZGVkYmViZWRkYjJlMzBmY2U4ZDRmYTAyNTc1ZCIsInJlcV9jb250ZW50Ijoic2VjX3RzIiwicmVxX3NpZ24iOiJ5MXUrNDZ0cXRwQ2tyQjNWSkJBWDN4SnN3RXB6c1RXZjNmWXZ5ZkhtYmh3PSIsInNlY190cyI6IiNiOUswNnhvcUFOQURSV25RdGJpMkM1Ty9lbU1uYThwVDBuZ3dPUkFtTTFCVk0rOVlZWHA2dzJUY3h0WmEifQ%3D%3D; IsDouyinActive=false; home_can_add_dy_2_desktop=%220%22; stream_recommend_feed_params=%22%7B%5C%22cookie_enabled%5C%22%3Atrue%2C%5C%22screen_width%5C%22%3A1920%2C%5C%22screen_height%5C%22%3A1080%2C%5C%22browser_online%5C%22%3Atrue%2C%5C%22cpu_core_num%5C%22%3A8%2C%5C%22device_memory%5C%22%3A8%2C%5C%22downlink%5C%22%3A10%2C%5C%22effective_type%5C%22%3A%5C%224g%5C%22%2C%5C%22round_trip_time%5C%22%3A50%7D%22; bd_ticket_guard_client_data=eyJiZC10aWNrZXQtZ3VhcmQtdmVyc2lvbiI6MiwiYmQtdGlja2V0LWd1YXJkLWl0ZXJhdGlvbi12ZXJzaW9uIjoxLCJiZC10aWNrZXQtZ3VhcmQtcmVlLXB1YmxpYy1rZXkiOiJCR09wdnhqU2d6VEt6Tm5Md2NablNMdjBScmROdUxKS29DMEZBK2Z6YXB0bVNBdXpQZEVLS2tZb2NsNXpROHY2TWxYMjA2NDZFYUJJTkYxVW5JdWdibzg9IiwiYmQtdGlja2V0LWd1YXJkLXdlYi12ZXJzaW9uIjoyfQ%3D%3D
+  proxies:
+    http://:
+    https://:
+  music: no
+  cover: no
+  desc: yes
+  folderize: yes
+  mode: post
+  naming: '{create}'
+
+
+# f2 tk -c my_apps.yaml -u https://www.tiktok.com/@hsin_oyen -i 2025-03-07 21-00-00|2025-03-07 22-00-00
+tiktok:
+  headers:
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
+      (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
+    Referer: https://www.tiktok.com/
+  cookie:
+  proxies:
+    http://:
+    https://:
+  music: no
+  cover: no
+  desc: yes
+  folderize: yes
+  mode: post
+  naming: '{create}'
+  # interval: 2025-03-07 20-00-00|2025-03-07 21-00-00
+
+weibo:
+  headers:
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
+      (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
+    Referer: https://www.weibo.com/
+  cookie:
+  proxies:
+    http://:
+    https://:
+
+twitter:
+  headers:
+    User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
+      (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
+    Referer: https://twitter.com/
+  cookie:
+  proxies:
+    http://:
+    https://:
+
+# bark:
+#   key: ""
+#   token: ""
