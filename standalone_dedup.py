@@ -9,7 +9,7 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import List
-from utils_common import setup_logging
+from Upload.utils.utils_common import setup_logging
 
 # 配置日志
 logger = setup_logging('logs/standalone_dedup.log')

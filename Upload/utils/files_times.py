@@ -1,9 +1,8 @@
 from datetime import timedelta
-
 from datetime import datetime
 from pathlib import Path
 
-from conf import BASE_DIR
+from Upload.conf import BASE_DIR
 
 
 def get_absolute_path(relative_path: str, base_dir: str = None) -> str:
@@ -72,8 +71,10 @@ def generate_schedule_time_next_day(total_videos, videos_per_day, daily_times=No
 
         # Calculate the time for the current video
         hour = daily_times[daily_video_index]
-        time_offset = timedelta(days=day, hours=hour - current_time.hour, minutes=-current_time.minute,
-                                seconds=-current_time.second, microseconds=-current_time.microsecond)
+        time_offset = timedelta(
+            days=day, hours=hour - current_time.hour, minutes=-current_time.minute,
+            seconds=-current_time.second, microseconds=-current_time.microsecond
+        )
         timestamp = current_time + time_offset
 
         schedule.append(timestamp)

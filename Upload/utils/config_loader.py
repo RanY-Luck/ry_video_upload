@@ -5,6 +5,7 @@
 import os
 from pathlib import Path
 from typing import Any
+from dotenv import load_dotenv, find_dotenv
 
 
 class ConfigLoader:
@@ -27,15 +28,20 @@ class ConfigLoader:
 
     def _load_env(self):
         """加载 .env 文件"""
-        env_file = Path(__file__).parent / '.env'
 
-        if not env_file.exists():
+        # find_dotenv() 会自动向上查找 .env 文件
+        env_file = find_dotenv()
+
+        if not env_file:
             raise FileNotFoundError(
-                f"配置文件不存在: {env_file}\n"
-                "请先创建 .env 配置文件:\n"
+                "未找到 .env 配置文件\n"
+                "请在项目根目录创建 .env 文件:\n"
                 "  copy .env.example .env\n"
                 "然后编辑 .env 文件填写配置"
             )
+
+        load_dotenv(env_file)
+        print(f"✓ 已加载配置文件: {env_file}")
 
         # 手动解析 .env 文件（避免依赖 python-dotenv）
         with open(env_file, 'r', encoding='utf-8') as f:
@@ -167,15 +173,15 @@ class ConfigLoader:
         Returns:
             绝对路径
         """
-        base_dir = Path(__file__).parent.resolve()
+        base_dir = Path(__file__).parent.parent.resolve()
 
         # 路径映射
         paths = {
             'download_dir': 'Download/douyin/post',
             'dedup_dir': 'Dedup',
             'upload_dir': 'Upload',
-            'video_output_dir': 'Upload/videos',
-            'account_file': 'Upload/cookies/tencent_uploader/account.json'
+            'video_output_dir': 'videos',
+            'account_file': 'cookies/tencent_uploader/account.json'
         }
 
         relative_path = paths.get(key)

@@ -3,9 +3,7 @@
 抖音设备ID和Token刷新脚本
 用于生成新的msToken、ttwid和webid
 """
-
 import os
-import sys
 import asyncio
 from ruamel.yaml import YAML
 

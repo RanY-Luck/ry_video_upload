@@ -2,7 +2,6 @@
 通用工具模块
 提供路径配置、日志配置等通用功能
 """
-
 import sys
 import logging
 from pathlib import Path
@@ -17,19 +16,21 @@ def setup_project_paths():
     """
     project_root = Path(__file__).parent
     upload_dir = project_root / 'Upload'
-    
+
     # 添加到 sys.path（如果还未添加）
     if str(project_root) not in sys.path:
         sys.path.insert(0, str(project_root))
-    
+
     if str(upload_dir) not in sys.path:
         sys.path.insert(0, str(upload_dir))
 
 
-def setup_logging(log_file: str = 'app.log', 
-                  max_bytes: int = 10 * 1024 * 1024,
-                  backup_count: int = 5,
-                  level: int = logging.INFO):
+def setup_logging(
+        log_file: str = 'app.log',
+        max_bytes: int = 10 * 1024 * 1024,
+        backup_count: int = 5,
+        level: int = logging.INFO
+):
     """配置日志系统
     
     Args:
@@ -48,19 +49,19 @@ def setup_logging(log_file: str = 'app.log',
         backupCount=backup_count,
         encoding='utf-8'
     )
-    
+
     # 创建控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
-    
+
     # 设置格式
     formatter = logging.Formatter(
         '%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    
+
     file_handler.setFormatter(formatter)
     console_handler.setFormatter(formatter)
-    
+
     # 配置根日志器
     logging.basicConfig(
         level=level,
@@ -68,7 +69,7 @@ def setup_logging(log_file: str = 'app.log',
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[file_handler, console_handler]
     )
-    
+
     return logging.getLogger()
 
 
@@ -95,16 +96,16 @@ if __name__ == "__main__":
     print("=" * 60)
     print("通用工具模块测试")
     print("=" * 60)
-    
+
     # 测试路径设置
     setup_project_paths()
     print(f"✅ 项目路径已设置")
     print(f"   项目根目录: {get_project_root()}")
     print(f"   Upload 目录: {get_upload_dir()}")
-    
+
     # 测试日志配置
     logger = setup_logging('test.log')
     logger.info("✅ 日志系统已配置")
     logger.info("   日志文件: test.log")
-    
+
     print("\n✅ 所有测试通过!")

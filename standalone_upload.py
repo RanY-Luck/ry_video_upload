@@ -5,23 +5,19 @@
 import json
 import asyncio
 import logging
+import sys
 import dashscope
 from pathlib import Path
 from typing import Dict
-
-# 导入通用工具（必须在其他导入之前）
-from utils_common import setup_project_paths, setup_logging
+from Upload.utils.utils_common import setup_project_paths, setup_logging
+from Upload.uploader.tencent_uploader.main import weixin_setup, TencentVideo
+from Upload.utils.config_loader import config
 
 # 设置项目路径
 setup_project_paths()
 
-# 导入项目模块
-from config_loader import config
-from utils.constant import TencentZoneTypes
-from uploader.tencent_uploader.main import weixin_setup, TencentVideo
-
 # 配置日志
-logger = setup_logging('standalone_upload.log')
+logger = setup_logging('logs/standalone_upload.log')
 
 
 class StandaloneUploadConfig:

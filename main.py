@@ -9,14 +9,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List, Dict
 from zoneinfo import ZoneInfo
-from config_loader import config
 from functools import lru_cache
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-
+from Upload.utils.utils_common import setup_logging
 if os.name == 'nt':
     import win32api
 
@@ -24,8 +23,7 @@ if os.name == 'nt':
 __all__ = ['AppConfig', 'HandlerBase', 'TaskPlugin', 'FileManager', 'FlushHandler',
            'MainCommandHandler', 'UploadHandler', 'SchedulerManager']
 
-# 导入通用工具
-from utils_common import setup_logging
+
 
 # 配置日志（同时输出到终端和文件）
 logger = setup_logging('app.log')
