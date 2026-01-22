@@ -9,13 +9,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List, Dict
 from zoneinfo import ZoneInfo
+from config_loader import config
 from functools import lru_cache
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.blocking import BlockingScheduler
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-from logging.handlers import RotatingFileHandler
 
 if os.name == 'nt':
     import win32api
@@ -24,27 +24,11 @@ if os.name == 'nt':
 __all__ = ['AppConfig', 'HandlerBase', 'TaskPlugin', 'FileManager', 'FlushHandler',
            'MainCommandHandler', 'UploadHandler', 'SchedulerManager']
 
-# 配置日志（同时输出到终端和文件）
-handler = RotatingFileHandler(
-    'app.log',
-    maxBytes=10 * 1024 * 1024,
-    backupCount=5,
-    encoding='utf-8'  # 文件使用 UTF-8 编码
-)
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(
-    logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-)  # 终端输出格式与文件一致
+# 导入通用工具
+from utils_common import setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[handler, console_handler]
-)
+# 配置日志（同时输出到终端和文件）
+logger = setup_logging('app.log')
 
 
 # 配置类
@@ -67,18 +51,22 @@ class AppConfig:
     def __init__(self):
         base_dir = Path(__file__).parent.resolve()
 
-        self.DOWNLOAD_DIR = (base_dir / 'Download/douyin/post').resolve()
-        self.DEDUP_DIR = (base_dir / 'Dedup').resolve()
-        self.UPLOAD_DIR = (base_dir / 'Upload').resolve()
+        # 从配置文件加载路径
+        self.DOWNLOAD_DIR = config.get_path('download_dir')
+        self.DEDUP_DIR = config.get_path('dedup_dir')
+        self.UPLOAD_DIR = config.get_path('upload_dir')
         self.FLUSH_SCRIPT = (base_dir / 'flush_device_id.py').resolve()
         self.DEDUP_SCRIPT = (base_dir / 'Dedup/dedup.py').resolve()
         self.UPLOAD_SCRIPT = (base_dir / 'Upload/vx_upload.py').resolve()
-        self.MAIN_COMMAND = ['f2', 'dy', '-c', 'my_apps.yaml', '-u',
-                             'https://www.douyin.com/user/MS4wLjABAAAA0r-B3uubLdhDTB1PuYZ-uKtjoD86_b1aW8HzG-G0DRg',
-                             '--mode', 'post']
-        self.SCHEDULE_INTERVAL = 300
-        self.TIMEZONE = 'Asia/Shanghai'
-        self.MAX_WORKERS = os.cpu_count()
+        
+        # 从配置文件加载抖音目标 URL
+        target_url = config.douyin_target_url
+        self.MAIN_COMMAND = ['f2', 'dy', '-c', 'my_apps.yaml', '-u', target_url, '--mode', 'post']
+        
+        # 从配置文件加载调度配置
+        self.SCHEDULE_INTERVAL = config.schedule_interval
+        self.TIMEZONE = config.timezone
+        self.MAX_WORKERS = config.max_workers
 
         # 自动创建目录(仅针对目录,不包括脚本文件)
         for directory in [self.DOWNLOAD_DIR, self.DEDUP_DIR, self.UPLOAD_DIR]:

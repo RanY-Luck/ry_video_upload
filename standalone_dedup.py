@@ -9,29 +9,10 @@ import logging
 import subprocess
 from pathlib import Path
 from typing import List
-from logging.handlers import RotatingFileHandler
+from utils_common import setup_logging
 
 # 配置日志
-handler = RotatingFileHandler(
-    'standalone_dedup.log',
-    maxBytes=10 * 1024 * 1024,
-    backupCount=5,
-    encoding='utf-8'
-)
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(
-    logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[handler, console_handler]
-)
+logger = setup_logging('logs/standalone_dedup.log')
 
 
 class StandaloneDedupConfig:

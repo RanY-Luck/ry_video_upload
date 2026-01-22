@@ -1,16 +1,58 @@
+# IDE 和编辑器
 .idea/
 .vscode/
 .cursor/
 .DS_Store
+
+# Python 虚拟环境
 venv/
 .venv/
 .python-version
+
+# Python 缓存
 .ruff_cache/
 .pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# AI 助手
 .claude/
 .serena/
-logs
-Upload/videos
-Download
-Upload/logs
 
+# 日志文件
+logs/
+*.log
+app.log
+standalone_dedup.log
+standalone_upload.log
+
+# 视频和下载文件
+Upload/videos/
+Download/
+
+# 上传日志
+Upload/logs/
+
+# 敏感配置文件 (包含 API Key 等)
+.env
+config.yaml
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 临时文件
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# 账号 Cookie 文件
+Upload/cookies/
+*.json
+
+# 处理记录
+Dedup/processed_videos.log

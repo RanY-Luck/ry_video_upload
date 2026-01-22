@@ -2,46 +2,26 @@
 独立视频号上传工具
 功能: 上传 Upload/videos 目录下已去重的视频到视频号
 """
-
-import os
-import sys
 import json
 import asyncio
 import logging
 import dashscope
 from pathlib import Path
-from typing import Optional, Dict, List
-from logging.handlers import RotatingFileHandler
+from typing import Dict
 
-# 添加 Upload 目录到 Python 路径 (必须在导入 utils 之前)
-UPLOAD_DIR = Path(__file__).parent / 'Upload'
-sys.path.insert(0, str(UPLOAD_DIR))
+# 导入通用工具（必须在其他导入之前）
+from utils_common import setup_project_paths, setup_logging
 
-# 导入 Upload 目录下的模块
+# 设置项目路径
+setup_project_paths()
+
+# 导入项目模块
+from config_loader import config
 from utils.constant import TencentZoneTypes
 from uploader.tencent_uploader.main import weixin_setup, TencentVideo
 
 # 配置日志
-handler = RotatingFileHandler(
-    'standalone_upload.log',
-    maxBytes=10 * 1024 * 1024,
-    backupCount=5,
-    encoding='utf-8'
-)
-console_handler = logging.StreamHandler(sys.stdout)
-console_handler.setFormatter(
-    logging.Formatter(
-        '%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-)
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[handler, console_handler]
-)
+logger = setup_logging('standalone_upload.log')
 
 
 class StandaloneUploadConfig:
@@ -50,21 +30,18 @@ class StandaloneUploadConfig:
     def __init__(self):
         base_dir = Path(__file__).parent.resolve()
 
-        # 目录配置
-        self.UPLOAD_DIR = (base_dir / 'Upload').resolve()
-        self.VIDEO_DIR = (self.UPLOAD_DIR / 'videos').resolve()
-        self.ACCOUNT_FILE = (self.UPLOAD_DIR / 'cookies/tencent_uploader/account.json').resolve()
+        # 从配置文件加载路径
+        self.UPLOAD_DIR = config.get_path('upload_dir')
+        self.VIDEO_DIR = config.get_path('video_output_dir')
+        self.ACCOUNT_FILE = config.get_path('account_file')
 
-        # AI 配置 (阿里百炼 API Key)
-        # 需要在 https://bailian.console.aliyun.com/ 注册获取
-        self.DASHSCOPE_API_KEY = "sk-5930ab55016b4bdd8608f519724d20ff"
+        # 从配置文件加载 AI 配置
+        self.DASHSCOPE_API_KEY = config.dashscope_api_key
 
-        # 上传配置
-        self.CATEGORY = TencentZoneTypes.CUTE_PETS.value  # 视频分类
-        self.PUBLISH_DATE = 0  # 0 表示立即发布
-
-        # 上传后是否删除视频
-        self.DELETE_AFTER_UPLOAD = False
+        # 从配置文件加载上传配置
+        self.CATEGORY = config.upload_category
+        self.PUBLISH_DATE = config.publish_date
+        self.DELETE_AFTER_UPLOAD = config.delete_after_upload
 
         # 验证路径
         self._validate_paths()
@@ -197,12 +174,12 @@ class VideoUploader:
             元数据文件路径
         """
         metadata_file = video_path.with_suffix('.txt')
-        
+
         # 如果文件已存在,说明已经生成过或用户已修改,直接返回
         if metadata_file.exists():
             logging.info(f"元数据文件已存在: {metadata_file.name}")
             return metadata_file
-        
+
         # 先创建文件,写入默认内容
         logging.info(f"正在为 {video_path.name} 生成元数据文件...")
         with open(metadata_file, 'w', encoding='utf-8') as f:
@@ -215,13 +192,13 @@ class VideoUploader:
             f.write("# 请根据视频内容修改标题和标签\n")
             f.write("# 修改完成后保存文件即可\n")
             f.write("# ==============================\n")
-        
+
         logging.info(f"✅ 已创建元数据文件: {metadata_file.name}")
-        
+
         # AI 分析视频生成标题和标签
         logging.info(f"AI 分析视频: {video_path.name}")
         ai_result = self.ai_analyzer.analyze_video(video_path)
-        
+
         # 更新文件内容
         with open(metadata_file, 'w', encoding='utf-8') as f:
             f.write(f"标题: {ai_result['title']}\n")
@@ -233,11 +210,11 @@ class VideoUploader:
             f.write("# 请根据视频内容修改标题和标签\n")
             f.write("# 修改完成后保存文件即可\n")
             f.write("# ==============================\n")
-        
+
         logging.info(f"✅ AI 分析完成,已更新元数据文件")
         logging.info(f"   标题: {ai_result['title']}")
         logging.info(f"   标签: {ai_result['tag']}")
-        
+
         return metadata_file
 
     def read_metadata_file(self, metadata_file: Path) -> Dict[str, any]:
@@ -252,28 +229,28 @@ class VideoUploader:
         try:
             with open(metadata_file, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-            
+
             title = ""
             tags = []
-            
+
             for line in lines:
                 line = line.strip()
                 if line.startswith('#') or not line:
                     continue
-                
+
                 if line.startswith('标题:') or line.startswith('标题：'):
                     title = line.split(':', 1)[1].strip() if ':' in line else line.split('：', 1)[1].strip()
                 elif line.startswith('标签:') or line.startswith('标签：'):
                     tag_str = line.split(':', 1)[1].strip() if ':' in line else line.split('：', 1)[1].strip()
                     tags = [tag.strip() for tag in tag_str.split(',') if tag.strip()]
-            
+
             if not title:
                 raise ValueError("未找到标题")
             if not tags:
                 raise ValueError("未找到标签")
-            
+
             return {'title': title, 'tags': tags}
-        
+
         except Exception as e:
             logging.error(f"读取元数据文件失败: {e}")
             raise
@@ -292,15 +269,15 @@ class VideoUploader:
             logging.info("=" * 60)
             logging.info(f"开始上传: {video_path.name}")
             logging.info("=" * 60)
-            
+
             # 读取元数据文件
             metadata = self.read_metadata_file(metadata_file)
             title = metadata['title']
             tags = metadata['tags']
-            
+
             logging.info(f"标题: {title}")
             logging.info(f"标签: {', '.join(tags)}")
-            
+
             # 上传视频
             logging.info("正在上传到视频号...")
             app = TencentVideo(
@@ -312,19 +289,19 @@ class VideoUploader:
                 category=self.config.CATEGORY
             )
             await app.main()
-            
+
             logging.info("=" * 60)
             logging.info(f"✅ 上传成功: {video_path.name}")
             logging.info("=" * 60)
-            
+
             # 上传成功后删除视频和元数据文件
             if self.config.DELETE_AFTER_UPLOAD:
                 video_path.unlink()
                 metadata_file.unlink()
                 logging.info(f"已删除本地文件: {video_path.name} 和 {metadata_file.name}")
-            
+
             return True
-        
+
         except Exception as e:
             logging.error("=" * 60)
             logging.error(f"❌ 上传失败: {video_path.name}")
@@ -335,17 +312,17 @@ class VideoUploader:
     def generate_all_metadata(self):
         """为所有视频生成元数据文件"""
         video_files = list(self.config.VIDEO_DIR.glob('*.mp4'))
-        
+
         if not video_files:
             logging.info("没有需要生成元数据的视频文件")
             return []
-        
+
         logging.info("=" * 60)
         logging.info(f"找到 {len(video_files)} 个视频文件")
         logging.info("=" * 60)
-        
+
         metadata_files = []
-        
+
         for i, video_file in enumerate(video_files, 1):
             logging.info(f"\n进度: [{i}/{len(video_files)}]")
             try:
@@ -353,7 +330,7 @@ class VideoUploader:
                 metadata_files.append((video_file, metadata_file))
             except Exception as e:
                 logging.error(f"生成元数据失败: {video_file.name} -> {e}")
-        
+
         return metadata_files
 
     async def upload_all_videos(self):
@@ -362,13 +339,13 @@ class VideoUploader:
         logging.info("\n" + "=" * 60)
         logging.info("【第一步】生成元数据文件")
         logging.info("=" * 60)
-        
+
         metadata_files = self.generate_all_metadata()
-        
+
         if not metadata_files:
             logging.info("没有需要上传的视频文件")
             return
-        
+
         # 第二步: 等待用户审核
         logging.info("\n" + "=" * 60)
         logging.info("【第二步】人工审核")
@@ -383,24 +360,24 @@ class VideoUploader:
         logging.info("⚠️  请根据实际视频内容修改标题和标签!")
         logging.info("")
         logging.info("✅ 修改完成后,按回车键继续上传...")
-        
+
         input()  # 等待用户按回车
-        
+
         # 第三步: 设置账号并上传
         logging.info("\n" + "=" * 60)
         logging.info("【第三步】上传视频")
         logging.info("=" * 60)
-        
+
         if not await self.setup_account():
             logging.error("账号设置失败,无法继续上传")
             return
-        
+
         success_count = 0
         fail_count = 0
-        
+
         for i, (video_file, metadata_file) in enumerate(metadata_files, 1):
             logging.info(f"\n进度: [{i}/{len(metadata_files)}]")
-            
+
             try:
                 result = await self.upload_single_video(video_file, metadata_file)
                 if result:
@@ -410,16 +387,15 @@ class VideoUploader:
             except Exception as e:
                 fail_count += 1
                 logging.error(f"上传异常: {e}")
-            
+
             logging.info(f"当前统计 - 成功: {success_count}, 失败: {fail_count}")
-        
+
         logging.info("\n" + "=" * 60)
         logging.info("上传完成!")
         logging.info(f"总计: {len(metadata_files)} 个文件")
         logging.info(f"成功: {success_count} 个")
         logging.info(f"失败: {fail_count} 个")
         logging.info("=" * 60)
-
 
 
 async def main():
