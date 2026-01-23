@@ -12,7 +12,7 @@ from Upload.utils.config_loader import config
 class BarkNotifier:
     """Bark 推送通知类"""
 
-    def __init__(self, bark_server: str = "https://api.day.app"):
+    def __init__(self, bark_key:str,bark_server: str = "https://api.day.app"):
         """
         初始化 Bark 推送器
         

@@ -8,7 +8,8 @@ Bark 是一个 iOS 推送通知服务，可以通过简单的 HTTP 请求发送�
 1. 在 iPhone 上安装 Bark App
 2. 获取你的 Bark 推送 Key（在 App 中可以看到）
 """
-
+import sys
+import time
 from Upload.utils.bark_notifier import BarkNotifier
 from Upload.utils.config_loader import config
 
@@ -46,7 +47,6 @@ def demo_music_sounds(bark_key: str):
         sound="minuet"
     )
 
-    import time
     time.sleep(2)
 
     # 音乐铃声示例 2: Calypso（卡吕普索）
@@ -187,7 +187,6 @@ def demo_video_processing_notification(bark_key: str):
     )
 
     # 模拟处理完成
-    import time
     time.sleep(2)
 
     notifier.send(
@@ -226,7 +225,6 @@ def run_all_demos(bark_key: str):
     """运行所有演示"""
     print("\n🚀 开始运行所有演示...\n")
 
-    import time
 
     # 为了避免推送过快，在每个演示之间添加延迟
     demos = [
@@ -263,8 +261,8 @@ def main():
     # 获取方式：在 iPhone 上安装 Bark App，打开后可以看到你的推送地址
     # 格式类似：https://api.day.app/YOUR_KEY/
     # 只需要填写 YOUR_KEY 部分
-    # BARK_KEY = "aG2Msu9QWoPCZ8sk6Jbqne"
-    BARK_KEY = config.bark_key
+    BARK_KEY = "aG2Msu9QWoPCZ8sk6Jbqne"
+    # BARK_KEY = config.bark_key
     print("BARK_KEY")
     if BARK_KEY == "YOUR_BARK_KEY_HERE":
         print("\n⚠️  请先在脚本中设置你的 BARK_KEY！")
@@ -292,7 +290,6 @@ def main():
     print(" 14. 查看所有可用铃声")
 
     # 简化为直接运行所有演示（也可以改为交互式选择）
-    import sys
     if len(sys.argv) > 1:
         choice = sys.argv[1]
         print(f"收到命令行参数: {choice}")
