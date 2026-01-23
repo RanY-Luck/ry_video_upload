@@ -8,6 +8,7 @@ import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, List, Dict
+from Upload.utils.config_loader import config
 from zoneinfo import ZoneInfo
 from functools import lru_cache
 from datetime import datetime, timedelta
@@ -26,7 +27,7 @@ __all__ = ['AppConfig', 'HandlerBase', 'TaskPlugin', 'FileManager', 'FlushHandle
 
 
 # 配置日志（同时输出到终端和文件）
-logger = setup_logging('app.log')
+logger = setup_logging('logs/app.log')
 
 
 # 配置类
@@ -309,7 +310,7 @@ class MainCommandHandler(HandlerBase):
     def execute_main_command(self, time_range_str: str) -> tuple[bool, bool]:
         # 不使用时间范围参数,改为限制采集数量避免f2库bug
         # 每次只采集最新的10个作品
-        command = self.config.MAIN_COMMAND + ["--max-counts", "10"]
+        command = self.config.MAIN_COMMAND + ["--max-counts", "1"]
         logging.info(
             f"\n{'=' * 35}\n开始执行主命令 - 时间: {datetime.now(ZoneInfo(self.config.TIMEZONE)).strftime('%Y-%m-%d %H:%M:%S')}"
         )
