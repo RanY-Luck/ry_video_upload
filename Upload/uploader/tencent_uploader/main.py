@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from datetime import datetime
+import json
 
 from playwright.async_api import Playwright, async_playwright
 import os
@@ -32,21 +33,112 @@ def format_str_for_short_title(origin_title: str) -> str:
 
 
 async def cookie_auth(account_file):
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
-        context = await browser.new_context(storage_state=account_file)
-        context = await set_init_script(context)
-        # 创建一个新的页面
-        page = await context.new_page()
-        # 访问指定的 URL
-        await page.goto("https://channels.weixin.qq.com/platform/post/create")
-        try:
-            await page.wait_for_selector('div.title-name:has-text("微信小店")', timeout=5000)  # 等待5秒
-            tencent_logger.error("[+] 等待5秒 cookie 失效")
+    """验证 cookie 和登录状态是否有效
+    
+    验证步骤:
+    1. 检查 account.json 文件中的关键字段
+    2. 验证 cookie 是否过期
+    3. 访问页面进行最终验证
+    
+    Returns:
+        bool: True 表示登录有效, False 表示需要重新登录
+    """
+    try:
+        # 第一步: 读取并检查 account.json 文件
+        tencent_logger.info("[+] 开始验证登录状态...")
+        
+        with open(account_file, 'r', encoding='utf-8') as f:
+            account_data = json.load(f)
+        
+        # 检查必要的 cookie 字段
+        cookies = account_data.get('cookies', [])
+        sessionid_cookie = None
+        wxuin_cookie = None
+        
+        for cookie in cookies:
+            if cookie.get('name') == 'sessionid':
+                sessionid_cookie = cookie
+            elif cookie.get('name') == 'wxuin':
+                wxuin_cookie = cookie
+        
+        if not sessionid_cookie or not wxuin_cookie:
+            tencent_logger.error("[+] Cookie 缺少必要字段 (sessionid 或 wxuin)")
             return False
-        except:
-            tencent_logger.success("[+] cookie 有效")
-            return True
+        
+        # 检查 sessionid 是否过期
+        expires = sessionid_cookie.get('expires', 0)
+        current_timestamp = datetime.now().timestamp()
+        
+        if expires <= current_timestamp:
+            tencent_logger.error(f"[+] Cookie 已过期 (过期时间: {datetime.fromtimestamp(expires)})")
+            return False
+        
+        tencent_logger.info(f"[+] Cookie 有效期至: {datetime.fromtimestamp(expires)}")
+        
+        # 检查 localStorage 中的关键字段
+        origins = account_data.get('origins', [])
+        if not origins:
+            tencent_logger.error("[+] LocalStorage 数据缺失")
+            return False
+        
+        local_storage = origins[0].get('localStorage', [])
+        has_finder_username = False
+        has_device_id = False
+        
+        for item in local_storage:
+            if item.get('name') == 'finder_username':
+                has_finder_username = True
+                tencent_logger.info(f"[+] 视频号用户名: {item.get('value', 'N/A')}")
+            elif item.get('name') == '_finger_print_device_id':
+                has_device_id = True
+                tencent_logger.info(f"[+] 设备指纹: {item.get('value', 'N/A')}")
+        
+        if not has_finder_username or not has_device_id:
+            tencent_logger.error("[+] LocalStorage 缺少关键字段")
+            return False
+        
+        # 第二步: 访问页面进行最终验证
+        tencent_logger.info("[+] 基础验证通过,正在访问页面进行最终验证...")
+        
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            context = await browser.new_context(storage_state=account_file)
+            context = await set_init_script(context)
+            page = await context.new_page()
+            
+            # 访问创建页面
+            await page.goto("https://channels.weixin.qq.com/platform/post/create")
+            
+            # 等待页面加载
+            await asyncio.sleep(2)
+            
+            # 检查当前 URL 是否正确(如果未登录会跳转到登录页)
+            current_url = page.url
+            if "login" in current_url.lower() or "platform/post/create" not in current_url:
+                tencent_logger.error(f"[+] 页面跳转到登录页: {current_url}")
+                await browser.close()
+                return False
+            
+            # 检查关键元素是否存在(发布按钮)
+            try:
+                await page.wait_for_selector('div.form-btns button:has-text("发表")', timeout=5000)
+                tencent_logger.success("[+] ✅ 登录状态有效,无需重新登录")
+                await browser.close()
+                return True
+            except:
+                tencent_logger.error("[+] 未找到发布按钮,可能未登录")
+                await browser.close()
+                return False
+                
+    except FileNotFoundError:
+        tencent_logger.error(f"[+] Cookie 文件不存在: {account_file}")
+        return False
+    except json.JSONDecodeError:
+        tencent_logger.error(f"[+] Cookie 文件格式错误: {account_file}")
+        return False
+    except Exception as e:
+        tencent_logger.error(f"[+] 验证登录状态时出错: {e}")
+        return False
 
 
 async def get_tencent_cookie(account_file):
@@ -71,14 +163,35 @@ async def get_tencent_cookie(account_file):
 
 
 async def weixin_setup(account_file, handle=False):
+    """设置视频号账号登录
+    
+    由于视频号的安全机制,每次上传都需要重新验证身份
+    因此直接打开浏览器进行扫码登录
+    
+    Args:
+        account_file: 账号文件路径
+        handle: 是否自动处理登录流程
+    
+    Returns:
+        bool: 登录是否成功
+    """
     account_file = get_absolute_path(account_file, "tencent_uploader")
-    if not os.path.exists(account_file) or not await cookie_auth(account_file):
-        if not handle:
-            # Todo alert message
-            return False
-        tencent_logger.info('[+] cookie文件不存在或已失效，即将自动打开浏览器，请扫码登录，登陆后会自动生成cookie文件')
+    
+    if not handle:
+        # 如果不自动处理,只检查文件是否存在
+        return os.path.exists(account_file)
+    
+    # 直接打开浏览器进行扫码登录
+    tencent_logger.info('[+] 正在打开浏览器,请使用微信扫码登录...')
+    tencent_logger.info('[+] 登录成功后,点击调试器的"继续"按钮')
+    
+    try:
         await get_tencent_cookie(account_file)
-    return True
+        tencent_logger.success('[+] ✅ 登录成功,已保存登录信息')
+        return True
+    except Exception as e:
+        tencent_logger.error(f'[+] ❌ 登录失败: {e}')
+        return False
 
 
 class TencentVideo(object):

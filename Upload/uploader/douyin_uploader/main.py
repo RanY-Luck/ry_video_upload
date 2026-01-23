@@ -1,13 +1,11 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
-
-from playwright.async_api import Playwright, async_playwright, Page
 import os
 import asyncio
-
-from conf import LOCAL_CHROME_PATH
-from utils.base_social_media import set_init_script
-from utils.log import douyin_logger
+from datetime import datetime
+from playwright.async_api import Playwright, async_playwright, Page
+from Upload.conf import LOCAL_CHROME_PATH
+from Upload.utils.base_social_media import set_init_script
+from Upload.utils.log import douyin_logger
 
 
 async def cookie_auth(account_file):

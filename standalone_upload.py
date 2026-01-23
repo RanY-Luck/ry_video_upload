@@ -330,10 +330,33 @@ class VideoUploader:
         return metadata_files
 
     async def upload_all_videos(self):
-        """上传所有视频 (支持人工审核)"""
-        # 第一步: 生成所有元数据文件
+        """上传所有视频 (优化后的流程)"""
+        
+        # 第一步: 账号登录 (提前扫码)
         logging.info("\n" + "=" * 60)
-        logging.info("【第一步】生成元数据文件")
+        logging.info("【第一步】账号登录")
+        logging.info("=" * 60)
+        logging.info("")
+        logging.info("⚠️  视频号需要扫码验证身份")
+        logging.info("📱 请准备好手机微信,即将打开浏览器...")
+        logging.info("")
+        logging.info("💡 提示: 扫码登录后,可以批量上传所有视频,无需重复扫码")
+        logging.info("")
+        logging.info("按回车键继续...")
+        
+        input()  # 等待用户按回车
+        
+        if not await self.setup_account():
+            logging.error("❌ 登录失败,无法继续上传")
+            logging.error("请检查网络连接或稍后重试")
+            return
+        
+        logging.info("✅ 登录成功!")
+        logging.info("")
+        
+        # 第二步: 生成所有元数据文件
+        logging.info("\n" + "=" * 60)
+        logging.info("【第二步】生成元数据文件")
         logging.info("=" * 60)
 
         metadata_files = self.generate_all_metadata()
@@ -342,9 +365,9 @@ class VideoUploader:
             logging.info("没有需要上传的视频文件")
             return
 
-        # 第二步: 等待用户审核
+        # 第三步: 等待用户审核
         logging.info("\n" + "=" * 60)
-        logging.info("【第二步】人工审核")
+        logging.info("【第三步】人工审核")
         logging.info("=" * 60)
         logging.info(f"✅ 已为 {len(metadata_files)} 个视频生成元数据文件")
         logging.info(f"📁 元数据文件位置: {self.config.VIDEO_DIR}")
@@ -359,14 +382,13 @@ class VideoUploader:
 
         input()  # 等待用户按回车
 
-        # 第三步: 设置账号并上传
+        # 第四步: 批量上传
         logging.info("\n" + "=" * 60)
-        logging.info("【第三步】上传视频")
+        logging.info("【第四步】批量上传")
         logging.info("=" * 60)
-
-        if not await self.setup_account():
-            logging.error("账号设置失败,无法继续上传")
-            return
+        logging.info(f"📤 开始上传 {len(metadata_files)} 个视频...")
+        logging.info("💡 使用已登录的会话,无需重复扫码")
+        logging.info("")
 
         success_count = 0
         fail_count = 0
