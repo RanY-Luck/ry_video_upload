@@ -28,7 +28,7 @@ class StandaloneDedupConfig:
         self.DEDUP_SCRIPT = (base_dir / 'Dedup/dedup.py').resolve()
         
         # 处理记录文件
-        self.PROCESSED_LOG = self.DEDUP_DIR / 'processed_videos.log'
+        self.PROCESSED_LOG = self.DEDUP_DIR / 'logs/processed_videos.log'
         
         # 线程配置
         self.MAX_WORKERS = os.cpu_count() or 4
