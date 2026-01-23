@@ -190,6 +190,11 @@ class ConfigLoader:
 
         return (base_dir / relative_path).resolve()
 
+    @property
+    def bark_key(self) -> str:
+        """bark 推送"""
+        return self.get_required('BARK_KEY')
+
 
 # 全局配置实例
 config = ConfigLoader()

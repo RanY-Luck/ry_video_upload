@@ -4,13 +4,14 @@
 """
 import json
 import asyncio
-import logging
 import sys
 import dashscope
 from pathlib import Path
 from typing import Dict
+from Upload.utils.log import logger as logging
 from Upload.utils.utils_common import setup_project_paths, setup_logging
 from Upload.uploader.tencent_uploader.main import weixin_setup, TencentVideo
+from Upload.utils.bark_notifier import BarkNotifier
 from Upload.utils.config_loader import config
 
 # 设置项目路径
@@ -24,8 +25,6 @@ class StandaloneUploadConfig:
     """独立上传工具配置类"""
 
     def __init__(self):
-        base_dir = Path(__file__).parent.resolve()
-
         # 从配置文件加载路径
         self.UPLOAD_DIR = config.get_path('upload_dir')
         self.VIDEO_DIR = config.get_path('video_output_dir')
@@ -329,9 +328,52 @@ class VideoUploader:
 
         return metadata_files
 
+    def notify_qr_login(self):
+        """发送扫码登录通知"""
+        try:
+            notifier = BarkNotifier()
+            notifier.send(
+                title="📱 需要扫码登录",
+                content="视频号上传工具需扫码登录，请并在控制台按回车继续",
+                level="timeSensitive",
+                sound="alarm",
+                group="视频上传",
+                icon="https://api.iconify.design/mdi:qrcode-scan.svg"
+            )
+        except Exception as e:
+            logging.error(f"发送通知失败: {e}")
+
+    def notify_manual_review(self, count):
+        """发送人工审核通知"""
+        try:
+            notifier = BarkNotifier()
+            notifier.send(
+                title="📝 等待人工审核",
+                content=f"已生成 {count} 个视频的元数据，请审核后在控制台按回车继续",
+                sound="minuet",
+                group="视频上传",
+                icon="https://api.iconify.design/mdi:file-document-edit-outline.svg"
+            )
+        except Exception as e:
+            logging.error(f"发送通知失败: {e}")
+
+    def notify_completion(self, count, success, fail):
+        """发送完成通知"""
+        try:
+            notifier = BarkNotifier()
+            notifier.send(
+                title="📤 视频上传完成",
+                content=f"总计: {count} | 成功: {success} | 失败: {fail}",
+                group="视频上传",
+                sound="fanfare",
+                icon="https://api.iconify.design/mdi:cloud-upload-outline.svg"
+            )
+        except Exception as e:
+            logging.error(f"发送通知失败: {e}")
+
     async def upload_all_videos(self):
         """上传所有视频 (优化后的流程)"""
-        
+
         # 第一步: 账号登录 (提前扫码)
         logging.info("\n" + "=" * 60)
         logging.info("【第一步】账号登录")
@@ -343,17 +385,20 @@ class VideoUploader:
         logging.info("💡 提示: 扫码登录后,可以批量上传所有视频,无需重复扫码")
         logging.info("")
         logging.info("按回车键继续...")
-        
+
+        # 发送扫码提醒
+        self.notify_qr_login()
+
         input()  # 等待用户按回车
-        
+
         if not await self.setup_account():
             logging.error("❌ 登录失败,无法继续上传")
             logging.error("请检查网络连接或稍后重试")
             return
-        
+
         logging.info("✅ 登录成功!")
         logging.info("")
-        
+
         # 第二步: 生成所有元数据文件
         logging.info("\n" + "=" * 60)
         logging.info("【第二步】生成元数据文件")
@@ -379,6 +424,9 @@ class VideoUploader:
         logging.info("⚠️  请根据实际视频内容修改标题和标签!")
         logging.info("")
         logging.info("✅ 修改完成后,按回车键继续上传...")
+
+        # 发送审核提醒
+        self.notify_manual_review(len(metadata_files))
 
         input()  # 等待用户按回车
 
@@ -414,6 +462,9 @@ class VideoUploader:
         logging.info(f"成功: {success_count} 个")
         logging.info(f"失败: {fail_count} 个")
         logging.info("=" * 60)
+
+        # 发送完成提醒
+        self.notify_completion(len(metadata_files), success_count, fail_count)
 
 
 async def main():

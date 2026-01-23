@@ -2,13 +2,16 @@
 独立视频去重工具
 功能:扫描 Download/ 目录下的所有 MP4 文件并进行去重处理
 """
+
 import os
 import sys
-import logging
 import subprocess
 from pathlib import Path
 from typing import List
+from Upload.utils.log import logger as logging
 from Upload.utils.utils_common import setup_logging
+from Upload.utils.bark_notifier import BarkNotifier
+from Upload.utils.config_loader import config
 
 # 配置日志
 logger = setup_logging('logs/standalone_dedup.log')
@@ -139,6 +142,22 @@ class StandaloneDedupProcessor:
             logging.error("=" * 60)
             return False
 
+    async def notify_completion(self, count, success, fail):
+        """发送完成通知"""
+        import asyncio
+        try:
+            notifier = BarkNotifier(config.bark_key)
+            await asyncio.to_thread(
+                notifier.send,
+                title="🎬 视频去重完成",
+                content=f"总计: {count} | 成功: {success} | 失败: {fail}",
+                group="视频处理",
+                sound="glass",
+                icon="https://api.iconify.design/mdi:layers-triple-outline.svg"
+            )
+        except Exception as e:
+            logging.error(f"发送通知失败: {e}")
+
     def process_all_videos(self):
         """顺序处理所有视频 (单线程,可看到实时进度)"""
         mp4_files = self.find_all_mp4_files()
@@ -177,6 +196,20 @@ class StandaloneDedupProcessor:
         logging.info(f"失败: {fail_count} 个")
         logging.info("=" * 60)
 
+        # 发送通知
+        import asyncio
+        try:
+            asyncio.run(self.notify_completion(len(mp4_files), success_count, fail_count))
+        except Exception:
+            # 如果已有 loop 正在运行 (极少情况), 退化为同步调用或者忽略
+            notifier = BarkNotifier(config.bark_key)
+            notifier.send(
+                title="🎬 视频去重完成",
+                content=f"总计: {len(mp4_files)} | 成功: {success_count} | 失败: {fail_count}",
+                group="视频处理",
+                sound="glass"
+            )
+
 
 def main():
     """主函数"""
@@ -186,10 +219,10 @@ def main():
         logging.info("=" * 50)
 
         # 初始化配置
-        config = StandaloneDedupConfig()
+        init_config = StandaloneDedupConfig()
 
         # 创建处理器
-        processor = StandaloneDedupProcessor(config)
+        processor = StandaloneDedupProcessor(init_config)
 
         # 执行去重
         processor.process_all_videos()
