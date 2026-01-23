@@ -1,8 +1,5 @@
 # 视频搬运工具 - 抖音全自动视频采集、去重与发布
 
-[![GitHub stars](https://img.shields.io/github/stars/toki-plus/video-mover?style=social)](https://github.com/toki-plus/video-mover/stargazers)
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
-
 **一款强大的全自动化内容创作流水线工具，专为抖音视频采集、二次创作和多平台发布设计。**
 
 > **📢 重要更新**: 本项目已从 TikTok 改为抖音采集，适配国内用户使用！
@@ -39,8 +36,8 @@
 
 #### 1. 克隆仓库
 ```bash
-git clone https://github.com/toki-plus/video-mover.git
-cd video-mover
+git clone https://github.com/RanY-Luck/ry_video_upload.git
+cd ry_video_upload
 ```
 
 #### 2. 安装依赖
@@ -261,12 +258,6 @@ video-mover/
 - `flush_device_id.py` - 刷新设备 ID
 - `config_loader.py` - 测试配置加载
 
-## 🤝 参与贡献
-
-欢迎任何形式的贡献！
-
-- 提交 [Issue](https://github.com/toki-plus/video-mover/issues)
-- Fork 并提交 [Pull Request](https://github.com/toki-plus/video-mover/pulls)
 
 如果这个项目对你有帮助，请点亮 ⭐!
 
@@ -274,11 +265,5 @@ video-mover/
 
 本项目基于 MIT 协议开源。详情请见 [LICENSE](LICENSE) 文件。
 
-## 📞 技术交流
-
-- 个人微信: toki-plus (请备注 "GitHub 定制")
-- 公众号: 获取最新技术分享与项目更新
-
----
 
 **注意**: 本工具仅供学习交流使用，请遵守相关平台的使用条款，不要用于商业用途或侵犯他人权益。
