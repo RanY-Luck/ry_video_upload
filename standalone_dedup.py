@@ -41,6 +41,9 @@ class StandaloneDedupConfig:
         for directory in [self.DOWNLOAD_DIR, self.DEDUP_DIR, self.UPLOAD_DIR]:
             directory.mkdir(parents=True, exist_ok=True)
 
+        # 创建日志目录
+        self.PROCESSED_LOG.parent.mkdir(parents=True, exist_ok=True)
+
         # 检查去重脚本
         if not self.DEDUP_SCRIPT.exists():
             raise FileNotFoundError(f"去重脚本不存在: {self.DEDUP_SCRIPT}")
