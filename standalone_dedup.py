@@ -2,7 +2,6 @@
 独立视频去重工具
 功能:扫描 Download/ 目录下的所有 MP4 文件并进行去重处理
 """
-
 import os
 import sys
 import subprocess
@@ -24,7 +23,12 @@ class StandaloneDedupConfig:
         base_dir = Path(__file__).parent.resolve()
 
         # 目录配置
-        self.DOWNLOAD_DIR = (base_dir / 'Download').resolve()
+        if config.dedup_source_dir:
+            self.DOWNLOAD_DIR = config.dedup_source_dir
+            logging.info(f"使用配置的去重源目录: {self.DOWNLOAD_DIR}")
+        else:
+            self.DOWNLOAD_DIR = (base_dir / 'Download').resolve()
+            
         self.DEDUP_DIR = (base_dir / 'Dedup').resolve()
         self.UPLOAD_DIR = (base_dir / 'Upload').resolve()
         self.DEDUP_SCRIPT = (base_dir / 'Dedup/dedup.py').resolve()

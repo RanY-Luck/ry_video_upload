@@ -195,6 +195,15 @@ class ConfigLoader:
         """bark 推送"""
         return self.get_required('BARK_KEY')
 
+    @property
+    def dedup_source_dir(self) -> Path:
+        """去重源目录 (支持 NAS 路径)"""
+        path_str = self.get('DEDUP_SOURCE_DIR')
+        if path_str:
+            return Path(path_str)
+        return None
+
+
 
 # 全局配置实例
 config = ConfigLoader()

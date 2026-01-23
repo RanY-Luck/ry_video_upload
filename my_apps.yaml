@@ -52,7 +52,3 @@ twitter:
   proxies:
     http://:
     https://:
-
-# bark:
-#   key: ""
-#   token: ""
