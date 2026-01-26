@@ -188,7 +188,8 @@ class VideoUploader:
             f.write("# 修改完成后保存文件即可\n")
             f.write("# ==============================\n")
 
-        logging.info(f"✅ 已创建元数据文件: {metadata_file.name}")
+        logging.info(f"✅"
+                     f" 已创建元数据文件: {metadata_file.name}")
 
         # AI 分析视频生成标题和标签
         logging.info(f"AI 分析视频: {video_path.name}")
@@ -331,7 +332,7 @@ class VideoUploader:
     def notify_qr_login(self):
         """发送扫码登录通知"""
         try:
-            notifier = BarkNotifier()
+            notifier = BarkNotifier(config.bark_key)
             notifier.send(
                 title="📱 需要扫码登录",
                 content="视频号上传工具需扫码登录，请并在控制台按回车继续",
@@ -346,7 +347,7 @@ class VideoUploader:
     def notify_manual_review(self, count):
         """发送人工审核通知"""
         try:
-            notifier = BarkNotifier()
+            notifier = BarkNotifier(config.bark_key)
             notifier.send(
                 title="📝 等待人工审核",
                 content=f"已生成 {count} 个视频的元数据，请审核后在控制台按回车继续",
@@ -360,7 +361,7 @@ class VideoUploader:
     def notify_completion(self, count, success, fail):
         """发送完成通知"""
         try:
-            notifier = BarkNotifier()
+            notifier = BarkNotifier(config.bark_key)
             notifier.send(
                 title="📤 视频上传完成",
                 content=f"总计: {count} | 成功: {success} | 失败: {fail}",
