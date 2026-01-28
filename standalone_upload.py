@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict
 from Upload.utils.log import logger as logging
 from Upload.utils.utils_common import setup_project_paths, setup_logging
-from Upload.uploader.tencent_uploader.main import weixin_setup, TencentVideo
+from Upload.uploader.tencent_uploader.main import TencentVideo
 from Upload.utils.bark_notifier import BarkNotifier
 from Upload.utils.config_loader import config
 
@@ -149,14 +149,51 @@ class VideoUploader:
         self.ai_analyzer = AIAnalyzer(config.DASHSCOPE_API_KEY)
 
     async def setup_account(self) -> bool:
-        """设置账号登录"""
+        """设置账号登录 (支持 cookie 复用)"""
         try:
-            logging.info("正在设置视频号账号...")
-            await weixin_setup(self.config.ACCOUNT_FILE, handle=True)
-            logging.info("✅ 账号设置成功")
-            return True
+            # 检查账号文件是否存在
+            if self.config.ACCOUNT_FILE.exists():
+                logging.info("检测到已保存的登录状态,正在验证 cookie 有效性...")
+                
+                # 导入 cookie_auth 函数
+                from Upload.uploader.tencent_uploader.main import cookie_auth
+                
+                # 验证 cookie 是否有效
+                is_valid = await cookie_auth(str(self.config.ACCOUNT_FILE))
+                
+                if is_valid:
+                    logging.info("✅ Cookie 有效,无需重新扫码")
+                    return True
+                else:
+                    logging.warning("⚠️  Cookie 已失效,需要重新登录")
+            else:
+                logging.info("未找到登录状态,需要扫码登录")
+            
+            # Cookie 不存在或已失效,使用 weixin_setup 进行扫码登录
+            logging.info("")
+            logging.info("=" * 60)
+            logging.info("📱 准备扫码登录")
+            logging.info("=" * 60)
+            logging.info("💡 登录成功后,cookie 将被保存,下次无需重复扫码")
+            logging.info("⏰ 请准备好手机微信,浏览器即将打开...")
+            logging.info("")
+            
+            # 使用 weixin_setup 进行扫码登录
+            # handle=True 会打开浏览器进行扫码
+            from Upload.uploader.tencent_uploader.main import weixin_setup
+            success = await weixin_setup(str(self.config.ACCOUNT_FILE), handle=True)
+            
+            if success:
+                logging.info("✅ 扫码登录成功,cookie 已保存")
+                return True
+            else:
+                logging.error("❌ 扫码登录失败")
+                return False
+                
         except Exception as e:
             logging.error(f"❌ 账号设置失败: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             return False
 
     def generate_metadata_file(self, video_path: Path) -> Path:
@@ -375,20 +412,23 @@ class VideoUploader:
     async def upload_all_videos(self):
         """上传所有视频 (优化后的流程)"""
 
-        # 第一步: 账号登录 (提前扫码)
+        # 第一步: 账号登录 (智能登录)
         logging.info("\n" + "=" * 60)
         logging.info("【第一步】账号登录")
         logging.info("=" * 60)
         logging.info("")
-        logging.info("⚠️  视频号需要扫码验证身份")
-        logging.info("📱 请准备好手机微信,即将打开浏览器...")
+        logging.info("💡 智能登录说明:")
+        logging.info("   - 如果已有 cookie → 自动复用,无需扫码")
+        logging.info("   - 如果 cookie 过期 → 通过 Bark 推送二维码扫码登录")
+        logging.info("   - 登录成功后 → cookie 自动保存,下次无需扫码")
         logging.info("")
-        logging.info("💡 提示: 扫码登录后,可以批量上传所有视频,无需重复扫码")
+        logging.info("📱 如需扫码,请准备好手机微信...")
         logging.info("")
         logging.info("按回车键继续...")
 
-        # 发送扫码提醒
-        self.notify_qr_login()
+        # 发送扫码提醒(如果需要的话)
+        if not self.config.ACCOUNT_FILE.exists():
+            self.notify_qr_login()
 
         input()  # 等待用户按回车
 
@@ -457,12 +497,10 @@ class VideoUploader:
 
             logging.info(f"当前统计 - 成功: {success_count}, 失败: {fail_count}")
 
-        logging.info("\n" + "=" * 60)
         logging.info("上传完成!")
         logging.info(f"总计: {len(metadata_files)} 个文件")
         logging.info(f"成功: {success_count} 个")
         logging.info(f"失败: {fail_count} 个")
-        logging.info("=" * 60)
 
         # 发送完成提醒
         self.notify_completion(len(metadata_files), success_count, fail_count)

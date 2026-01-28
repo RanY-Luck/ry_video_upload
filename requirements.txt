@@ -25,3 +25,4 @@ xhs==0.2.13
 eventlet==0.40.4
 cf_clearance
 schedule
+httpx==0.28.1

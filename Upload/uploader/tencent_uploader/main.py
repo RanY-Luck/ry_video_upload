@@ -1,15 +1,44 @@
 # -*- coding: utf-8 -*-
-from datetime import datetime
 import json
-
-from playwright.async_api import Playwright, async_playwright
 import os
 import asyncio
-
+from datetime import datetime
+from playwright.async_api import Playwright, async_playwright
 from Upload.conf import LOCAL_CHROME_PATH
 from Upload.utils.base_social_media import set_init_script
 from Upload.utils.files_times import get_absolute_path
 from Upload.utils.log import tencent_logger
+
+
+def is_docker_environment() -> bool:
+    """
+    检测是否在 Docker 环境中运行
+    
+    检测方式:
+    1. 检查 /.dockerenv 文件是否存在
+    2. 检查环境变量 DOCKER_ENV
+    3. 检查 /proc/1/cgroup 中是否包含 docker
+    
+    Returns:
+        bool: True 表示在 Docker 环境中
+    """
+    # 方式1: 检查 .dockerenv 文件
+    if os.path.exists('/.dockerenv'):
+        return True
+
+    # 方式2: 检查环境变量
+    if os.environ.get('DOCKER_ENV', '').lower() in ('true', '1', 'yes'):
+        return True
+
+    # 方式3: 检查 cgroup (Linux 特有)
+    try:
+        with open('/proc/1/cgroup', 'r') as f:
+            if 'docker' in f.read():
+                return True
+    except (FileNotFoundError, PermissionError):
+        pass
+
+    return False
 
 
 def format_str_for_short_title(origin_title: str) -> str:
@@ -46,45 +75,45 @@ async def cookie_auth(account_file):
     try:
         # 第一步: 读取并检查 account.json 文件
         tencent_logger.info("[+] 开始验证登录状态...")
-        
+
         with open(account_file, 'r', encoding='utf-8') as f:
             account_data = json.load(f)
-        
+
         # 检查必要的 cookie 字段
         cookies = account_data.get('cookies', [])
         sessionid_cookie = None
         wxuin_cookie = None
-        
+
         for cookie in cookies:
             if cookie.get('name') == 'sessionid':
                 sessionid_cookie = cookie
             elif cookie.get('name') == 'wxuin':
                 wxuin_cookie = cookie
-        
+
         if not sessionid_cookie or not wxuin_cookie:
             tencent_logger.error("[+] Cookie 缺少必要字段 (sessionid 或 wxuin)")
             return False
-        
+
         # 检查 sessionid 是否过期
         expires = sessionid_cookie.get('expires', 0)
         current_timestamp = datetime.now().timestamp()
-        
+
         if expires <= current_timestamp:
             tencent_logger.error(f"[+] Cookie 已过期 (过期时间: {datetime.fromtimestamp(expires)})")
             return False
-        
+
         tencent_logger.info(f"[+] Cookie 有效期至: {datetime.fromtimestamp(expires)}")
-        
+
         # 检查 localStorage 中的关键字段
         origins = account_data.get('origins', [])
         if not origins:
             tencent_logger.error("[+] LocalStorage 数据缺失")
             return False
-        
+
         local_storage = origins[0].get('localStorage', [])
         has_finder_username = False
         has_device_id = False
-        
+
         for item in local_storage:
             if item.get('name') == 'finder_username':
                 has_finder_username = True
@@ -92,33 +121,33 @@ async def cookie_auth(account_file):
             elif item.get('name') == '_finger_print_device_id':
                 has_device_id = True
                 tencent_logger.info(f"[+] 设备指纹: {item.get('value', 'N/A')}")
-        
+
         if not has_finder_username or not has_device_id:
             tencent_logger.error("[+] LocalStorage 缺少关键字段")
             return False
-        
+
         # 第二步: 访问页面进行最终验证
         tencent_logger.info("[+] 基础验证通过,正在访问页面进行最终验证...")
-        
+
         async with async_playwright() as playwright:
             browser = await playwright.chromium.launch(headless=True)
             context = await browser.new_context(storage_state=account_file)
             context = await set_init_script(context)
             page = await context.new_page()
-            
+
             # 访问创建页面
             await page.goto("https://channels.weixin.qq.com/platform/post/create")
-            
+
             # 等待页面加载
             await asyncio.sleep(2)
-            
+
             # 检查当前 URL 是否正确(如果未登录会跳转到登录页)
             current_url = page.url
             if "login" in current_url.lower() or "platform/post/create" not in current_url:
                 tencent_logger.error(f"[+] 页面跳转到登录页: {current_url}")
                 await browser.close()
                 return False
-            
+
             # 检查关键元素是否存在(发布按钮)
             try:
                 await page.wait_for_selector('div.form-btns button:has-text("发表")', timeout=5000)
@@ -129,7 +158,7 @@ async def cookie_auth(account_file):
                 tencent_logger.error("[+] 未找到发布按钮,可能未登录")
                 await browser.close()
                 return False
-                
+
     except FileNotFoundError:
         tencent_logger.error(f"[+] Cookie 文件不存在: {account_file}")
         return False
@@ -168,6 +197,8 @@ async def weixin_setup(account_file, handle=False):
     由于视频号的安全机制,每次上传都需要重新验证身份
     因此直接打开浏览器进行扫码登录
     
+    在 Docker 环境中,会通过 Bark 推送二维码到手机
+    
     Args:
         account_file: 账号文件路径
         handle: 是否自动处理登录流程
@@ -176,15 +207,29 @@ async def weixin_setup(account_file, handle=False):
         bool: 登录是否成功
     """
     account_file = get_absolute_path(account_file, "tencent_uploader")
-    
+
     if not handle:
         # 如果不自动处理,只检查文件是否存在
         return os.path.exists(account_file)
-    
-    # 直接打开浏览器进行扫码登录
+
+    # 检测 Docker 环境
+    if is_docker_environment():
+        tencent_logger.info('[+] 检测到 Docker 环境，使用 Bark 推送二维码登录...')
+        try:
+            from Upload.uploader.tencent_uploader.docker_qr_login import DockerQRLogin
+            docker_login = DockerQRLogin(account_file, timeout=180)
+            return await docker_login.docker_login()
+        except ImportError as e:
+            tencent_logger.error(f'[+] Docker 登录模块导入失败: {e}')
+            return False
+        except Exception as e:
+            tencent_logger.error(f'[+] Docker 登录失败: {e}')
+            return False
+
+    # 非 Docker 环境: 直接打开浏览器进行扫码登录
     tencent_logger.info('[+] 正在打开浏览器,请使用微信扫码登录...')
     tencent_logger.info('[+] 登录成功后,点击调试器的"继续"按钮')
-    
+
     try:
         await get_tencent_cookie(account_file)
         tencent_logger.success('[+] ✅ 登录成功,已保存登录信息')
@@ -289,8 +334,10 @@ class TencentVideo(object):
 
     async def add_short_title(self, page):
         short_title_element = page.get_by_text("短标题", exact=True).locator("..").locator(
-            "xpath=following-sibling::div").locator(
-            'span input[type="text"]')
+            "xpath=following-sibling::div"
+        ).locator(
+            'span input[type="text"]'
+        )
         if await short_title_element.count():
             short_title = format_str_for_short_title(self.title)
             await short_title_element.fill(short_title)
@@ -320,7 +367,8 @@ class TencentVideo(object):
             try:
                 # 匹配删除按钮，代表视频上传完毕
                 if "weui-desktop-btn_disabled" not in await page.get_by_role("button", name="发表").get_attribute(
-                        'class'):
+                        'class'
+                ):
                     tencent_logger.info("  [-]视频上传完毕")
                     break
                 else:
@@ -328,7 +376,8 @@ class TencentVideo(object):
                     await asyncio.sleep(2)
                     # 出错了视频出错
                     if await page.locator('div.status-msg.error').count() and await page.locator(
-                            'div.media-status-content div.tag-inner:has-text("删除")').count():
+                            'div.media-status-content div.tag-inner:has-text("删除")'
+                    ).count():
                         tencent_logger.error("  [-] 发现上传出错了...准备重试")
                         await self.handle_upload_error(page)
             except:
@@ -346,7 +395,8 @@ class TencentVideo(object):
 
     async def add_collection(self, page):
         collection_elements = page.get_by_text("添加到合集").locator("xpath=following-sibling::div").locator(
-            '.option-list-wrap > div')
+            '.option-list-wrap > div'
+        )
         if await collection_elements.count() > 1:
             await page.get_by_text("添加到合集").locator("xpath=following-sibling::div").click()
             await collection_elements.first.click()
@@ -365,12 +415,14 @@ class TencentVideo(object):
             if not await page.locator('div.declare-original-checkbox input.ant-checkbox-input').is_disabled():
                 await page.locator('div.declare-original-checkbox input.ant-checkbox-input').click()
                 if not await page.locator(
-                        'div.declare-original-dialog label.ant-checkbox-wrapper.ant-checkbox-wrapper-checked:visible').count():
+                        'div.declare-original-dialog label.ant-checkbox-wrapper.ant-checkbox-wrapper-checked:visible'
+                ).count():
                     await page.locator('div.declare-original-dialog input.ant-checkbox-input:visible').click()
             if await page.locator('div.original-type-form > div.form-label:has-text("原创类型"):visible').count():
                 await page.locator('div.form-content:visible').click()  # 下拉菜单
                 await page.locator(
-                    f'div.form-content:visible ul.weui-desktop-dropdown__list li.weui-desktop-dropdown__list-ele:has-text("{self.category}")').first.click()
+                    f'div.form-content:visible ul.weui-desktop-dropdown__list li.weui-desktop-dropdown__list-ele:has-text("{self.category}")'
+                ).first.click()
                 await page.wait_for_timeout(1000)
             if await page.locator('button:has-text("声明原创"):visible').count():
                 await page.locator('button:has-text("声明原创"):visible').click()
