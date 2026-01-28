@@ -55,4 +55,7 @@ Upload/cookies/
 *.json
 
 # 处理记录
-Dedup/processed_videos.log
+Dedup/logs/processed_videos.log
+
+# 图片
+images

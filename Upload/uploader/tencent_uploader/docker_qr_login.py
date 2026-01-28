@@ -7,7 +7,6 @@ Docker 环境二维码登录模块
 import asyncio
 import base64
 import httpx
-import sys
 from pathlib import Path
 from typing import Optional, Tuple
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
@@ -15,33 +14,6 @@ from Upload.utils.bark_notifier import BarkNotifier
 from Upload.utils.base_social_media import set_init_script
 from Upload.utils.config_loader import config
 from Upload.utils.log import tencent_logger
-
-
-# ============================================================================
-# Windows 平台 asyncio 事件循环错误修复
-# ============================================================================
-# 在 Windows 上,asyncio.run() 关闭事件循环时,Playwright 子进程可能还在清理资源
-# 这会导致 "RuntimeError: Event loop is closed" 错误
-# 通过 monkey patch 抑制这个无害的错误信息
-if sys.platform.startswith("win"):
-    from asyncio.proactor_events import _ProactorBasePipeTransport
-    from functools import wraps
-
-    def silence_event_loop_closed(func):
-        """装饰器:抑制事件循环关闭时的 RuntimeError"""
-        @wraps(func)
-        def wrapper(self, *args, **kwargs):
-            try:
-                return func(self, *args, **kwargs)
-            except RuntimeError as e:
-                if str(e) != 'Event loop is closed':
-                    raise
-        return wrapper
-
-    # 修补 _ProactorBasePipeTransport.__del__ 方法
-    _ProactorBasePipeTransport.__del__ = silence_event_loop_closed(
-        _ProactorBasePipeTransport.__del__
-    )
 
 
 class DockerQRLogin:
@@ -52,15 +24,6 @@ class DockerQRLogin:
 
     # 登录成功后的 URL 特征
     SUCCESS_URL_PATTERN = "channels.weixin.qq.com/platform"
-
-    # 二维码选择器
-    QR_SELECTORS = [
-        '.qrcode-wrap img',                                  # 用户指定的准确位置
-        'img.login__type__container__content__qrcode__img',  # 原有选择器
-        'div.login__type__container__content__qrcode img',   # 备用选择器
-        'img[src*="data:image"]',                            # Base64 图片
-        'img.qrcode',                                        # 其他可能性
-    ]
 
     # sm.ms 图床 API
     SMMS_API_URL = "https://sm.ms/api/v2/upload"
@@ -115,23 +78,25 @@ class DockerQRLogin:
         )
 
         # 注入反爬脚本 (Stealth)
-        await self.context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            });
-            // 覆盖 chrome 对象
-            window.chrome = {
-                runtime: {}
-            };
-            // 覆盖 plugins
-            Object.defineProperty(navigator, 'plugins', {
-                get: () => [1, 2, 3, 4, 5]
-            });
-            // 覆盖 languages
-            Object.defineProperty(navigator, 'languages', {
-                get: () => ['zh-CN', 'zh']
-            });
-        """)
+        await self.context.add_init_script(
+            """
+                        Object.defineProperty(navigator, 'webdriver', {
+                            get: () => undefined
+                        });
+                        // 覆盖 chrome 对象
+                        window.chrome = {
+                            runtime: {}
+                        };
+                        // 覆盖 plugins
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => [1, 2, 3, 4, 5]
+                        });
+                        // 覆盖 languages
+                        Object.defineProperty(navigator, 'languages', {
+                            get: () => ['zh-CN', 'zh']
+                        });
+                    """
+        )
 
         self.context = await set_init_script(self.context)
         self.page = await self.context.new_page()
@@ -179,19 +144,18 @@ class DockerQRLogin:
         await self._simulate_human_behavior()
 
         # 保存页面加载后的全屏截图，用于调试
-        await self.page.screenshot(path="debug_page_load.png", full_page=True)
-        tencent_logger.info("[Docker登录] 已保存页面调试截图: debug_page_load.png")
+        await self.page.screenshot(path="images/debug_page_load.png", full_page=True)
+        tencent_logger.info("[Docker登录] 已保存页面调试截图: images/debug_page_load.png")
 
         # 等待页面加载
         await asyncio.sleep(3)
 
         image_data = None
 
-
         # 尝试读取已保存的全屏截图
         try:
-            if Path("debug_page_load.png").exists():
-                with open("debug_page_load.png", "rb") as f:
+            if Path("images/debug_page_load.png").exists():
+                with open("images/debug_page_load.png", "rb") as f:
                     image_data = f.read()
                 tencent_logger.info("[Docker登录] 成功读取全屏截图作为二维码图片")
                 # 返回空字符串作为 src，因为全屏截图没有单一的 URL
@@ -203,59 +167,16 @@ class DockerQRLogin:
         tencent_logger.error("[Docker登录] 无法获取任何图片，保存失败截图和页面源码")
         await self.page.screenshot(path="debug_qr_failed.png")
 
-
         # 保存获取到的图片用于调试
-        with open("debug_qr_element.png", "wb") as f:
+        with open("images/debug_qr_element.png", "wb") as f:
             f.write(image_data)
         tencent_logger.info("[Docker登录] 二维码图片已保存至 debug_qr_element.png")
 
         return image_data
 
-    # async def upload_image_to_smms(self, image_data: bytes) -> Optional[str]:
-    #     """
-    #     上传图片到 sm.ms 图床
-    #
-    #     Args:
-    #         image_data: 图片二进制数据
-    #
-    #     Returns:
-    #         公网可访问的图片 URL，失败返回 None
-    #     """
-    #     tencent_logger.info("[Docker登录] 正在上传二维码到 sm.ms 图床...")
-    #
-    #     try:
-    #         async with httpx.AsyncClient(timeout=30) as client:
-    #             files = {'smfile': ('qrcode.png', image_data, 'image/png')}
-    #             headers = {'Authorization': ''}  # sm.ms 匿名上传
-    #
-    #             response = await client.post(
-    #                 self.SMMS_API_URL,
-    #                 files=files,
-    #                 headers=headers
-    #             )
-    #
-    #             result = response.json()
-    #
-    #             if result.get('success'):
-    #                 url = result['data']['url']
-    #                 tencent_logger.info(f"[Docker登录] 图片上传成功: {url}")
-    #                 return url
-    #             elif result.get('code') == 'image_repeated':
-    #                 # 图片已存在，返回已有 URL
-    #                 url = result.get('images', '')
-    #                 tencent_logger.info(f"[Docker登录] 图片已存在: {url}")
-    #                 return url
-    #             else:
-    #                 tencent_logger.error(f"[Docker登录] 图床上传失败: {result.get('message')}")
-    #                 return None
-    #
-    #     except Exception as e:
-    #         tencent_logger.error(f"[Docker登录] 图床上传异常: {e}")
-    #         return None
-
     async def upload_image_to_imgbb(self, image_data: bytes, api_key: str) -> Optional[str]:
         """
-        上传图片到 imgbb 图床（备用方案）
+        上传图片到 imgbb 图床
         
         Args:
             image_data: 图片二进制数据
@@ -445,9 +366,7 @@ class DockerQRLogin:
         Returns:
             登录是否成功
         """
-        tencent_logger.info("=" * 60)
         tencent_logger.info("[Docker登录] 开始 Docker 环境登录流程")
-        tencent_logger.info("=" * 60)
 
         try:
             # Step 1: 初始化浏览器
@@ -484,10 +403,7 @@ class DockerQRLogin:
 
             # 发送成功通知
             self.notify_login_success()
-
-            tencent_logger.info("=" * 60)
             tencent_logger.info("[Docker登录] ✅ Docker 环境登录成功！")
-            tencent_logger.info("=" * 60)
 
             return True
 
@@ -523,5 +439,6 @@ if __name__ == "__main__":
         result = await login.docker_login()
         print(f"登录结果: {'成功' if result else '失败'}")
         return result
+
 
     success = asyncio.run(demo())

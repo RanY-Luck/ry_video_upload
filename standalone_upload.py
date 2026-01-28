@@ -127,8 +127,6 @@ class AIAnalyzer:
             result = json.loads(result_text)
 
             logging.info(f"✅ AI 分析完成")
-            logging.info(f"标题: {result['title']}")
-            logging.info(f"标签: {result['tag']}")
 
             return result
 
@@ -154,13 +152,13 @@ class VideoUploader:
             # 检查账号文件是否存在
             if self.config.ACCOUNT_FILE.exists():
                 logging.info("检测到已保存的登录状态,正在验证 cookie 有效性...")
-                
+
                 # 导入 cookie_auth 函数
                 from Upload.uploader.tencent_uploader.main import cookie_auth
-                
+
                 # 验证 cookie 是否有效
                 is_valid = await cookie_auth(str(self.config.ACCOUNT_FILE))
-                
+
                 if is_valid:
                     logging.info("✅ Cookie 有效,无需重新扫码")
                     return True
@@ -168,28 +166,24 @@ class VideoUploader:
                     logging.warning("⚠️  Cookie 已失效,需要重新登录")
             else:
                 logging.info("未找到登录状态,需要扫码登录")
-            
+
             # Cookie 不存在或已失效,使用 weixin_setup 进行扫码登录
-            logging.info("")
-            logging.info("=" * 60)
             logging.info("📱 准备扫码登录")
-            logging.info("=" * 60)
             logging.info("💡 登录成功后,cookie 将被保存,下次无需重复扫码")
             logging.info("⏰ 请准备好手机微信,浏览器即将打开...")
-            logging.info("")
-            
+
             # 使用 weixin_setup 进行扫码登录
             # handle=True 会打开浏览器进行扫码
             from Upload.uploader.tencent_uploader.main import weixin_setup
             success = await weixin_setup(str(self.config.ACCOUNT_FILE), handle=True)
-            
+
             if success:
                 logging.info("✅ 扫码登录成功,cookie 已保存")
                 return True
             else:
                 logging.error("❌ 扫码登录失败")
                 return False
-                
+
         except Exception as e:
             logging.error(f"❌ 账号设置失败: {e}")
             import traceback
@@ -225,8 +219,10 @@ class VideoUploader:
             f.write("# 修改完成后保存文件即可\n")
             f.write("# ==============================\n")
 
-        logging.info(f"✅"
-                     f" 已创建元数据文件: {metadata_file.name}")
+        logging.info(
+            f"✅"
+            f" 已创建元数据文件: {metadata_file.name}"
+        )
 
         # AI 分析视频生成标题和标签
         logging.info(f"AI 分析视频: {video_path.name}")
@@ -245,8 +241,8 @@ class VideoUploader:
             f.write("# ==============================\n")
 
         logging.info(f"✅ AI 分析完成,已更新元数据文件")
-        logging.info(f"   标题: {ai_result['title']}")
-        logging.info(f"   标签: {ai_result['tag']}")
+        logging.info(f"标题: {ai_result['title']}")
+        logging.info(f"标签: {ai_result['tag']}")
 
         return metadata_file
 
@@ -299,9 +295,7 @@ class VideoUploader:
             上传是否成功
         """
         try:
-            logging.info("=" * 60)
             logging.info(f"开始上传: {video_path.name}")
-            logging.info("=" * 60)
 
             # 读取元数据文件
             metadata = self.read_metadata_file(metadata_file)
@@ -323,9 +317,7 @@ class VideoUploader:
             )
             await app.main()
 
-            logging.info("=" * 60)
             logging.info(f"✅ 上传成功: {video_path.name}")
-            logging.info("=" * 60)
 
             # 上传成功后删除视频和元数据文件
             if self.config.DELETE_AFTER_UPLOAD:
@@ -336,10 +328,8 @@ class VideoUploader:
             return True
 
         except Exception as e:
-            logging.error("=" * 60)
             logging.error(f"❌ 上传失败: {video_path.name}")
             logging.error(f"错误信息: {e}")
-            logging.error("=" * 60)
             return False
 
     def generate_all_metadata(self):
@@ -350,9 +340,7 @@ class VideoUploader:
             logging.info("没有需要生成元数据的视频文件")
             return []
 
-        logging.info("=" * 60)
         logging.info(f"找到 {len(video_files)} 个视频文件")
-        logging.info("=" * 60)
 
         metadata_files = []
 
@@ -413,75 +401,45 @@ class VideoUploader:
         """上传所有视频 (优化后的流程)"""
 
         # 第一步: 账号登录 (智能登录)
-        logging.info("\n" + "=" * 60)
         logging.info("【第一步】账号登录")
-        logging.info("=" * 60)
-        logging.info("")
         logging.info("💡 智能登录说明:")
         logging.info("   - 如果已有 cookie → 自动复用,无需扫码")
         logging.info("   - 如果 cookie 过期 → 通过 Bark 推送二维码扫码登录")
         logging.info("   - 登录成功后 → cookie 自动保存,下次无需扫码")
-        logging.info("")
-        logging.info("📱 如需扫码,请准备好手机微信...")
-        logging.info("")
-        logging.info("按回车键继续...")
-
         # 发送扫码提醒(如果需要的话)
         if not self.config.ACCOUNT_FILE.exists():
             self.notify_qr_login()
-
-        input()  # 等待用户按回车
 
         if not await self.setup_account():
             logging.error("❌ 登录失败,无法继续上传")
             logging.error("请检查网络连接或稍后重试")
             return
-
         logging.info("✅ 登录成功!")
-        logging.info("")
-
         # 第二步: 生成所有元数据文件
-        logging.info("\n" + "=" * 60)
         logging.info("【第二步】生成元数据文件")
-        logging.info("=" * 60)
-
         metadata_files = self.generate_all_metadata()
-
         if not metadata_files:
             logging.info("没有需要上传的视频文件")
             return
-
         # 第三步: 等待用户审核
-        logging.info("\n" + "=" * 60)
         logging.info("【第三步】人工审核")
-        logging.info("=" * 60)
         logging.info(f"✅ 已为 {len(metadata_files)} 个视频生成元数据文件")
         logging.info(f"📁 元数据文件位置: {self.config.VIDEO_DIR}")
-        logging.info("")
         logging.info("📝 请检查并修改每个视频对应的 .txt 文件:")
         for video_file, metadata_file in metadata_files:
-            logging.info(f"   - {metadata_file.name}")
-        logging.info("")
+            logging.info(f"{metadata_file.name}")
         logging.info("⚠️  请根据实际视频内容修改标题和标签!")
-        logging.info("")
         logging.info("✅ 修改完成后,按回车键继续上传...")
-
         # 发送审核提醒
         self.notify_manual_review(len(metadata_files))
 
         input()  # 等待用户按回车
 
         # 第四步: 批量上传
-        logging.info("\n" + "=" * 60)
         logging.info("【第四步】批量上传")
-        logging.info("=" * 60)
         logging.info(f"📤 开始上传 {len(metadata_files)} 个视频...")
-        logging.info("💡 使用已登录的会话,无需重复扫码")
-        logging.info("")
-
         success_count = 0
         fail_count = 0
-
         for i, (video_file, metadata_file) in enumerate(metadata_files, 1):
             logging.info(f"\n进度: [{i}/{len(metadata_files)}]")
 
@@ -509,9 +467,7 @@ class VideoUploader:
 async def main():
     """主函数"""
     try:
-        logging.info("=" * 60)
         logging.info("独立视频号上传工具启动")
-        logging.info("=" * 60)
 
         # 初始化配置
         config = StandaloneUploadConfig()
