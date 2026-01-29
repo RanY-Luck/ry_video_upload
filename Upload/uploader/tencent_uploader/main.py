@@ -103,30 +103,28 @@ async def cookie_auth(account_file):
 
         tencent_logger.info(f"[+] Cookie 有效期至: {datetime.fromtimestamp(expires)}")
 
-        # 检查 localStorage 中的关键字段
+        # 检查 localStorage 中的关键字段 (可选验证)
         origins = account_data.get('origins', [])
         if not origins:
-            tencent_logger.error("[+] LocalStorage 数据缺失")
-            return False
+            tencent_logger.warning("[!] LocalStorage 数据缺失 (跳过严格检查)")
+        else:
+            local_storage = origins[0].get('localStorage', [])
+            has_finder_username = False
+            has_device_id = False
 
-        local_storage = origins[0].get('localStorage', [])
-        has_finder_username = False
-        has_device_id = False
+            for item in local_storage:
+                if item.get('name') == 'finder_username':
+                    has_finder_username = True
+                    tencent_logger.info(f"[+] 视频号用户名: {item.get('value', 'N/A')}")
+                elif item.get('name') == '_finger_print_device_id':
+                    has_device_id = True
+                    tencent_logger.info(f"[+] 设备指纹: {item.get('value', 'N/A')}")
 
-        for item in local_storage:
-            if item.get('name') == 'finder_username':
-                has_finder_username = True
-                tencent_logger.info(f"[+] 视频号用户名: {item.get('value', 'N/A')}")
-            elif item.get('name') == '_finger_print_device_id':
-                has_device_id = True
-                tencent_logger.info(f"[+] 设备指纹: {item.get('value', 'N/A')}")
-
-        if not has_finder_username or not has_device_id:
-            tencent_logger.error("[+] LocalStorage 缺少关键字段")
-            return False
-
-        # ✅ 基础验证通过
-        tencent_logger.success("[+] ✅ Cookie 文件验证通过,登录状态有效")
+            if not has_finder_username or not has_device_id:
+                tencent_logger.warning("[!] LocalStorage 缺少关键字段 (仅警告,继续尝试使用 Cookie)")
+            
+        # ✅ 基础验证通过 (只要 Cookie 没过期且包含必要字段,就尝试使用)
+        tencent_logger.success("[+] ✅ Cookie 文件初步验证通过")
         return True
 
     except FileNotFoundError:
@@ -176,7 +174,8 @@ async def weixin_setup(account_file, handle=False):
     Returns:
         bool: 登录是否成功
     """
-    account_file = get_absolute_path(account_file, "tencent_uploader")
+    if not os.path.isabs(account_file):
+        account_file = get_absolute_path(account_file, "tencent_uploader")
 
     if not handle:
         # 如果不自动处理,只检查文件是否存在

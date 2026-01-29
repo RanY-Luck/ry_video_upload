@@ -2,6 +2,7 @@
 独立视频号上传工具
 功能: 上传 Upload/videos 目录下已去重的视频到视频号
 """
+import time
 import json
 import asyncio
 import os
@@ -39,7 +40,7 @@ class StandaloneUploadConfig:
         self.CATEGORY = config.upload_category
         self.PUBLISH_DATE = config.publish_date
         self.DELETE_AFTER_UPLOAD = config.delete_after_upload
-        
+
         # 新增配置
         self.NAS_DIR = config.nas_dir
         self.DOCKER_MODE = config.docker_mode
@@ -73,7 +74,7 @@ class AIAnalyzer:
         dashscope.api_key = api_key
 
     def analyze_video(self, video_path: Path, original_title: str = "") -> Dict[str, str]:
-        """使用 AI 分析视频,生成标题和标签
+        """使用 AI 分析视频,生成标题和标签 (带重试机制)
         
         Args:
             video_path: 视频文件路径
@@ -82,74 +83,84 @@ class AIAnalyzer:
         Returns:
             包含 title 和 tag 的字典
         """
-        try:
-            logging.info(f"AI 分析视频: {video_path.name}")
+        max_retries = 5
+        retry_delay = 2
 
-            from dashscope import MultiModalConversation
+        for attempt in range(1, max_retries + 1):
+            try:
+                logging.info(f"AI 分析视频: {video_path.name} (第 {attempt}/{max_retries} 次尝试)")
 
-            messages = [
-                {
-                    "role": "system",
-                    "content": [{
-                        "type": "text",
-                        "text": """
-                        你是一位拥有10年经验的资深短视频运营专家,擅长跨平台内容重构与爆款公式设计。
-                        你会分析视频内容,结合中国用户心理,利用悬念前置、感官刺激、认知冲突等钩子设计爆款中文标题和热门中文标签。
-                        标题中可以适当使用1-2个表情图标,标签数量大于8个。
-                        严格按照以下 JSON 格式输出结果:
-                        {
-                            "title": "标题",
-                            "tag": "标签1,标签2,标签3,标签4,标签5,标签6,标签7,标签8"
-                        }
-                        """
-                    }]
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {"video": f"file://{video_path}"},
-                        {"text": f"原始标题: {original_title}" if original_title else "请分析这个视频"}
-                    ]
-                }
-            ]
+                from dashscope import MultiModalConversation
 
-            responses = MultiModalConversation.call(
-                model="qwen-vl-max-latest",
-                messages=messages,
-                stream=True,
-                incremental_output=True,
-                timeout=60
-            )
+                messages = [
+                    {
+                        "role": "system",
+                        "content": [{
+                            "type": "text",
+                            "text": """
+                            你是一位拥有10年经验的资深短视频运营专家,擅长跨平台内容重构与爆款公式设计。
+                            你会分析视频内容,结合中国用户心理,利用悬念前置、感官刺激、认知冲突等钩子设计爆款中文标题和热门中文标签。
+                            标题中可以适当使用1-2个表情图标,标签数量大于8个。
+                            严格按照以下 JSON 格式输出结果:
+                            {
+                                "title": "标题",
+                                "tag": "标签1,标签2,标签3,标签4,标签5,标签6,标签7,标签8"
+                            }
+                            """
+                        }]
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"video": f"file://{video_path}"},
+                            {"text": f"原始标题: {original_title}" if original_title else "请分析这个视频"}
+                        ]
+                    }
+                ]
 
-            full_content = []
-            for response in responses:
-                try:
-                    content = response["output"]["choices"][0]["message"]["content"]
-                    if content and isinstance(content, list) and "text" in content[0]:
-                        text_content = content[0]["text"]
-                        full_content.append(text_content)
-                except (KeyError, IndexError) as error:
-                    logging.debug(f"解析响应时出错: {error}")
-                except Exception as e:
-                    logging.debug(f"未知错误: {e}")
+                responses = MultiModalConversation.call(
+                    model="qwen-vl-max-latest",
+                    messages=messages,
+                    stream=True,
+                    incremental_output=True,
+                    timeout=600  # 增加超时时间到 10 分钟, 适应大文件
+                )
 
-            result_text = ''.join(full_content)
-            result = json.loads(result_text)
+                full_content = []
+                for response in responses:
+                    try:
+                        content = response["output"]["choices"][0]["message"]["content"]
+                        if content and isinstance(content, list) and "text" in content[0]:
+                            text_content = content[0]["text"]
+                            full_content.append(text_content)
+                    except (KeyError, IndexError) as error:
+                        logging.debug(f"解析响应时出错: {error}")
+                    except Exception as e:
+                        logging.debug(f"未知错误: {e}")
 
-            logging.info(f"✅ AI 分析完成")
+                result_text = ''.join(full_content)
+                result = json.loads(result_text)
 
-            return result
+                if result.get('title') and result.get('tag'):
+                    logging.info(f"✅ AI 分析完成")
+                    return result
+                else:
+                    raise ValueError("AI 返回结果格式不正确")
 
-        except Exception as e:
-            logging.error(f"❌ AI 分析失败: {str(e)}")
-            # 返回默认值
-            return {
-                'title': video_path.stem,  # 使用文件名作为标题
-                'tag': '生活,日常,分享,有趣,推荐,精彩,热门,必看'
-            }
+            except Exception as e:
+                logging.warning(f"⚠️ AI 分析失败 (第 {attempt} 次): {str(e)}")
+                if attempt < max_retries:
+                    logging.info(f"等待 {retry_delay} 秒后重试...")
+                    # 改用 time.sleep
+                    time.sleep(retry_delay)
+                else:
+                    logging.error(f"❌ AI 分析最终失败: {video_path.name}")
 
-
-
+        # 所有重试失败后返回默认值
+        return {
+            'title': video_path.stem,
+            'tag': '生活,日常,分享,有趣,推荐,精彩,热门,必看'
+        }
 
 
 class VideoUploader:
@@ -158,7 +169,7 @@ class VideoUploader:
     def __init__(self, config: StandaloneUploadConfig):
         self.config = config
         self.ai_analyzer = AIAnalyzer(config.DASHSCOPE_API_KEY)
-        
+
         # 如果启用了 Docker 模拟模式,设置环境变量
         if self.config.DOCKER_MODE:
             os.environ['DOCKER_ENV'] = 'true'
@@ -167,6 +178,30 @@ class VideoUploader:
         # 初始化上传历史记录
         self.history_file = Path('logs/uploaded_history.txt')
         self.uploaded_history = self._load_history()
+
+    def scan_video_width(self, video_path: Path) -> int:
+        """获取视频宽度
+        
+        Args:
+            video_path: 视频文件路径
+            
+        Returns:
+            int: 视频宽度, 如果获取失败则返回 0
+        """
+        try:
+            import cv2
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                return 0
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            cap.release()
+            return width
+        except ImportError:
+            logging.warning("未安装 opencv-python, 无法获取视频分辨率")
+            return 0
+        except Exception as e:
+            logging.error(f"获取视频宽度失败: {e}")
+            return 0
 
     def _load_history(self) -> set:
         """加载已上传视频的历史记录"""
@@ -206,7 +241,7 @@ class VideoUploader:
             return
 
         logging.info(f"正在从 NAS 拉取视频: {nas_dir} -> {target_dir}")
-        
+
         # 查找所有 .mp4 文件
         video_files = list(nas_dir.glob('*.mp4'))
         if not video_files:
@@ -214,6 +249,8 @@ class VideoUploader:
             return
 
         import shutil
+        import sys
+
         count = 0
         for video_file in video_files:
             if count >= 1:
@@ -224,17 +261,17 @@ class VideoUploader:
             # 保留: 中文, 英文, 数字
             stem = video_file.stem
             suffix = video_file.suffix
-            
+
             # 使用正则替换非中文、非字母、非数字的字符为空
             new_stem = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', stem)
-            
+
             # 如果处理后文件名为空(全是特殊符号),则保留原名或使用默认名
             if not new_stem:
                 logging.warning(f"文件名清洗后为空: {stem}, 使用原名")
                 new_stem = stem
-            
+
             new_filename = f"{new_stem}{suffix}"
-            
+
             # 检查是否已上传过
             if new_filename in self.uploaded_history:
                 logging.info(f"文件已在上传历史中,跳过: {new_filename}")
@@ -243,24 +280,45 @@ class VideoUploader:
             target_file = target_dir / new_filename
 
             if not target_file.exists():
+                # 获取文件大小 (MB)
+                file_size_mb = video_file.stat().st_size / (1024 * 1024)
+
+                # 获取视频宽度
+                width = self.scan_video_width(video_file)
+
+                # 自动过滤: 只保留宽度为 720 的视频
+                if width != 720:
+                    logging.info(f"跳过非 720p 视频: {video_file.name} (宽度: {width})")
+                    continue
+
+                logging.info(f"发现符合条件的视频: {video_file.name}")
+                logging.info(f"清洗后名: {new_filename}")
+                logging.info(f"文件大小: {file_size_mb:.2f} MB")
+                logging.info(f"视频宽度: {width}")
+
                 try:
-                    logging.info(f"复制文件: {video_file.name} -> {new_filename}")
+                    logging.info(f"正在复制: {video_file.name} -> {new_filename}")
                     shutil.copy2(video_file, target_file)
                     count += 1
                 except Exception as e:
                     logging.error(f"复制失败 {video_file.name}: {e}")
+
+                # 复制成功后直接跳出（因为只需要一个）
+                break
+
             else:
                 logging.debug(f"文件已存在,跳过: {new_filename}")
-        
+
         logging.info(f"✅ 从 NAS 拉取完成,新增 {count} 个视频")
 
     async def setup_account(self) -> bool:
         """设置账号登录 (支持 cookie 复用 + 验证缓存)"""
         try:
             # 检查账号文件是否存在
+            logging.info(f"正在检查账号文件: {self.config.ACCOUNT_FILE.absolute()}")
             if self.config.ACCOUNT_FILE.exists():
                 logging.info("检测到已保存的登录状态,正在验证 cookie 有效性...")
-
+                
                 # 导入 cookie_auth 函数
                 from Upload.uploader.tencent_uploader.main import cookie_auth
 
@@ -428,7 +486,7 @@ class VideoUploader:
 
             # 上传成功后保存记录并删除视频和元数据文件
             self._save_history(video_path.name)
-            
+
             if self.config.DELETE_AFTER_UPLOAD:
                 video_path.unlink()
                 metadata_file.unlink()
@@ -444,7 +502,7 @@ class VideoUploader:
     def generate_all_metadata(self):
         """为所有视频生成元数据文件"""
         all_video_files = list(self.config.VIDEO_DIR.glob('*.mp4'))
-        
+
         # 过滤已上传的视频
         video_files = []
         for v in all_video_files:
@@ -527,12 +585,12 @@ class VideoUploader:
             logging.error("❌ 登录失败,无法继续上传")
             logging.error("请检查网络连接或稍后重试")
             return
-            
+
         # 第二步: 从 NAS 拉取视频
         if self.config.NAS_DIR:
             logging.info("【第二步】从 NAS 拉取视频")
             self.fetch_from_nas(self.config.NAS_DIR, self.config.VIDEO_DIR)
-            
+
         # 第三步: 生成所有元数据文件
         logging.info("【第三步】生成元数据文件")
         metadata_files = self.generate_all_metadata()
@@ -555,7 +613,7 @@ class VideoUploader:
 
         # 第五步: 批量上传
         logging.info("【第五步】批量上传")
-        
+
         # 再次检查登录状态 (防止在人工审核期间 session 过期)
         logging.info("正在验证登录状态...")
         if not await self.setup_account():
