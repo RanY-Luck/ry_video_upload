@@ -147,7 +147,7 @@ class VideoUploader:
         self.ai_analyzer = AIAnalyzer(config.DASHSCOPE_API_KEY)
 
     async def setup_account(self) -> bool:
-        """设置账号登录 (支持 cookie 复用)"""
+        """设置账号登录 (支持 cookie 复用 + 验证缓存)"""
         try:
             # 检查账号文件是否存在
             if self.config.ACCOUNT_FILE.exists():
@@ -160,7 +160,6 @@ class VideoUploader:
                 is_valid = await cookie_auth(str(self.config.ACCOUNT_FILE))
 
                 if is_valid:
-                    logging.info("✅ Cookie 有效,无需重新扫码")
                     return True
                 else:
                     logging.warning("⚠️  Cookie 已失效,需要重新登录")
@@ -402,10 +401,6 @@ class VideoUploader:
 
         # 第一步: 账号登录 (智能登录)
         logging.info("【第一步】账号登录")
-        logging.info("💡 智能登录说明:")
-        logging.info("   - 如果已有 cookie → 自动复用,无需扫码")
-        logging.info("   - 如果 cookie 过期 → 通过 Bark 推送二维码扫码登录")
-        logging.info("   - 登录成功后 → cookie 自动保存,下次无需扫码")
         # 发送扫码提醒(如果需要的话)
         if not self.config.ACCOUNT_FILE.exists():
             self.notify_qr_login()
@@ -414,7 +409,6 @@ class VideoUploader:
             logging.error("❌ 登录失败,无法继续上传")
             logging.error("请检查网络连接或稍后重试")
             return
-        logging.info("✅ 登录成功!")
         # 第二步: 生成所有元数据文件
         logging.info("【第二步】生成元数据文件")
         metadata_files = self.generate_all_metadata()

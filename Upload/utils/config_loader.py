@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 from dotenv import load_dotenv, find_dotenv
 
+from Upload.utils.log import tencent_logger
+
 
 class ConfigLoader:
     """配置加载器 - 从 .env 文件加载环境变量"""
@@ -41,7 +43,7 @@ class ConfigLoader:
             )
 
         load_dotenv(env_file)
-        print(f"✓ 已加载配置文件: {env_file}")
+        tencent_logger.info(f"✓ 已加载配置文件: {env_file}")
 
         # 手动解析 .env 文件（避免依赖 python-dotenv）
         with open(env_file, 'r', encoding='utf-8') as f:

@@ -64,18 +64,17 @@ def format_str_for_short_title(origin_title: str) -> str:
 async def cookie_auth(account_file):
     """验证 cookie 和登录状态是否有效
     
-    验证步骤:
-    1. 检查 account.json 文件中的关键字段
-    2. 验证 cookie 是否过期
-    3. 访问页面进行最终验证
+    优化后的验证策略:
+    1. 只验证 Cookie 文件的完整性和过期时间
+    2. 不进行实际页面访问验证(避免触发微信风控)
+    3. 真正的登录验证会在上传时进行(使用有头浏览器,不会触发风控)
     
     Returns:
-        bool: True 表示登录有效, False 表示需要重新登录
+        bool: True 表示 Cookie 文件有效, False 表示需要重新登录
     """
     try:
         # 第一步: 读取并检查 account.json 文件
         tencent_logger.info("[+] 开始验证登录状态...")
-
         with open(account_file, 'r', encoding='utf-8') as f:
             account_data = json.load(f)
 
@@ -126,38 +125,9 @@ async def cookie_auth(account_file):
             tencent_logger.error("[+] LocalStorage 缺少关键字段")
             return False
 
-        # 第二步: 访问页面进行最终验证
-        tencent_logger.info("[+] 基础验证通过,正在访问页面进行最终验证...")
-
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
-            context = await browser.new_context(storage_state=account_file)
-            context = await set_init_script(context)
-            page = await context.new_page()
-
-            # 访问创建页面
-            await page.goto("https://channels.weixin.qq.com/platform/post/create")
-
-            # 等待页面加载
-            await asyncio.sleep(2)
-
-            # 检查当前 URL 是否正确(如果未登录会跳转到登录页)
-            current_url = page.url
-            if "login" in current_url.lower() or "platform/post/create" not in current_url:
-                tencent_logger.error(f"[+] 页面跳转到登录页: {current_url}")
-                await browser.close()
-                return False
-
-            # 检查关键元素是否存在(发布按钮)
-            try:
-                await page.wait_for_selector('div.form-btns button:has-text("发表")', timeout=5000)
-                tencent_logger.success("[+] ✅ 登录状态有效,无需重新登录")
-                await browser.close()
-                return True
-            except:
-                tencent_logger.error("[+] 未找到发布按钮,可能未登录")
-                await browser.close()
-                return False
+        # ✅ 基础验证通过
+        tencent_logger.success("[+] ✅ Cookie 文件验证通过,登录状态有效")
+        return True
 
     except FileNotFoundError:
         tencent_logger.error(f"[+] Cookie 文件不存在: {account_file}")
