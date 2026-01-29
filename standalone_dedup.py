@@ -218,9 +218,7 @@ class StandaloneDedupProcessor:
 def main():
     """主函数"""
     try:
-        logging.info("=" * 50)
         logging.info("独立视频去重工具启动")
-        logging.info("=" * 50)
 
         # 初始化配置
         init_config = StandaloneDedupConfig()
