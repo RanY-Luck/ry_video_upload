@@ -7,8 +7,10 @@ Docker 环境二维码登录模块
 import asyncio
 import base64
 import httpx
+import random
 from pathlib import Path
 from typing import Optional, Tuple
+from PIL import Image
 from playwright.async_api import async_playwright, Page, Browser, BrowserContext
 from Upload.utils.bark_notifier import BarkNotifier
 from Upload.utils.base_social_media import set_init_script
@@ -118,6 +120,45 @@ class DockerQRLogin:
         except Exception:
             pass
 
+    def crop_qr_code(self, image_path: str, output_path: str = None) -> bytes:
+        """
+        随机裁剪二维码图片,用于调试
+        
+        Args:
+            image_path: 原始图片路径
+            output_path: 裁剪后图片保存路径(可选)
+            
+        Returns:
+            裁剪后的图片二进制数据
+        """
+        try:
+            # 打开图片
+            img = Image.open(image_path)
+            width, height = img.size
+
+            tencent_logger.info(f"[Docker登录] 原始图片尺寸: {width}x{height}")
+
+            # 执行裁剪
+            # cropped_img = img.crop((left, top, right, bottom))
+            cropped_img = img.crop((1330, 330, 1550, 570))
+
+            # 保存裁剪后的图片
+            if not output_path:
+                output_path = image_path.replace('.png', '_cropped.png')
+
+            cropped_img.save(output_path)
+            tencent_logger.info(f"[Docker登录] ✅ 裁剪后图片已保存: {output_path}")
+
+            # 返回裁剪后的图片二进制数据
+            with open(output_path, 'rb') as f:
+                return f.read()
+
+        except Exception as e:
+            tencent_logger.error(f"[Docker登录] 图片裁剪失败: {e}")
+            # 如果裁剪失败,返回原图
+            with open(image_path, 'rb') as f:
+                return f.read()
+
     async def _close_browser(self) -> None:
         """关闭浏览器"""
         if self.context:
@@ -143,36 +184,42 @@ class DockerQRLogin:
         # 模拟人类操作
         await self._simulate_human_behavior()
 
-        # 保存页面加载后的全屏截图，用于调试
-        await self.page.screenshot(path="images/tencent_load.png", full_page=True)
-        tencent_logger.info("[Docker登录] 已保存页面调试截图: images/tencent_load.png")
+        # 保存页面加载后的全屏截图
+        original_screenshot_path = "images/tencent_load.png"
+        await self.page.screenshot(path=original_screenshot_path, full_page=True)
+        tencent_logger.info(f"[Docker登录] 已保存原始页面截图: {original_screenshot_path}")
 
         # 等待页面加载
         await asyncio.sleep(3)
 
         image_data = None
 
-        # 尝试读取已保存的全屏截图
+        # 尝试读取已保存的全屏截图并进行随机裁剪
         try:
-            if Path("images/tencent_load.png").exists():
-                with open("images/tencent_load.png", "rb") as f:
-                    image_data = f.read()
-                tencent_logger.info("[Docker登录] 成功读取全屏截图作为二维码图片")
+            if Path(original_screenshot_path).exists():
+                # 🎲 随机裁剪图片
+                tencent_logger.info("[Docker登录] 开始随机裁剪二维码图片...")
+                image_data = self.crop_qr_code(
+                    original_screenshot_path,
+                    "images/tencent_load_cropped.png"
+                )
+                tencent_logger.info("[Docker登录] ✅ 成功裁剪二维码图片")
                 # 返回空字符串作为 src，因为全屏截图没有单一的 URL
                 return image_data, ""
         except Exception as e:
-            tencent_logger.error(f"[Docker登录] 读取全屏截图失败: {e}")
+            tencent_logger.error(f"[Docker登录] 读取或裁剪截图失败: {e}")
 
-        # 如果连全屏截图都没有
-        tencent_logger.error("[Docker登录] 无法获取任何图片，保存失败截图和页面源码")
-        await self.page.screenshot(path="debug_qr_failed.png")
+        # # 如果连全屏截图都没有
+        # tencent_logger.error("[Docker登录] 无法获取任何图片，保存失败截图和页面源码")
+        # await self.page.screenshot(path="debug_qr_failed.png")
 
         # 保存获取到的图片用于调试
-        with open("images/debug_qr_element.png", "wb") as f:
-            f.write(image_data)
-        tencent_logger.info("[Docker登录] 二维码图片已保存至 debug_qr_element.png")
+        # if image_data:
+        #     with open("images/debug_qr_element.png", "wb") as f:
+        #         f.write(image_data)
+        #     tencent_logger.info("[Docker登录] 二维码图片已保存至 debug_qr_element.png")
 
-        return image_data
+        return image_data, ""
 
     async def upload_image_to_imgbb(self, image_data: bytes, api_key: str) -> Optional[str]:
         """
