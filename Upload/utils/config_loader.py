@@ -205,6 +205,19 @@ class ConfigLoader:
             return Path(path_str)
         return None
 
+    @property
+    def nas_dir(self) -> Path:
+        """NAS 视频素材目录"""
+        path_str = self.get('NAS_DIR')
+        if path_str:
+            return Path(path_str)
+        return None
+
+    @property
+    def docker_mode(self) -> bool:
+        """是否强制启用 Docker 模式 (Bark 扫码)"""
+        return self.get_bool('DOCKER_MODE', False)
+
 
 
 # 全局配置实例

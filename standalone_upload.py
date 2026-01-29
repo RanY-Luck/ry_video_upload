@@ -4,6 +4,7 @@
 """
 import json
 import asyncio
+import os
 import sys
 import dashscope
 from pathlib import Path
@@ -37,6 +38,10 @@ class StandaloneUploadConfig:
         self.CATEGORY = config.upload_category
         self.PUBLISH_DATE = config.publish_date
         self.DELETE_AFTER_UPLOAD = config.delete_after_upload
+        
+        # 新增配置
+        self.NAS_DIR = config.nas_dir
+        self.DOCKER_MODE = config.docker_mode
 
         # 验证路径
         self._validate_paths()
@@ -53,6 +58,10 @@ class StandaloneUploadConfig:
 
         logging.info(f"视频目录: {self.VIDEO_DIR}")
         logging.info(f"账号配置: {self.ACCOUNT_FILE}")
+        if self.NAS_DIR:
+            logging.info(f"NAS 目录: {self.NAS_DIR}")
+        if self.DOCKER_MODE:
+            logging.info("已启用 Docker 模拟模式")
 
 
 class AIAnalyzer:
@@ -139,12 +148,59 @@ class AIAnalyzer:
             }
 
 
+
+
+
 class VideoUploader:
     """视频上传类 (支持人工审核)"""
 
     def __init__(self, config: StandaloneUploadConfig):
         self.config = config
         self.ai_analyzer = AIAnalyzer(config.DASHSCOPE_API_KEY)
+        
+        # 如果启用了 Docker 模拟模式,设置环境变量
+        if self.config.DOCKER_MODE:
+            os.environ['DOCKER_ENV'] = 'true'
+            logging.info("已设置环境变量 DOCKER_ENV=true")
+
+    def fetch_from_nas(self, nas_dir: Path, target_dir: Path):
+        """从 NAS 目录拉取视频文件到本地
+        
+        Args:
+            nas_dir: NAS 目录路径
+            target_dir: 本地目标目录
+        """
+        if not nas_dir or not nas_dir.exists():
+            logging.warning("NAS 目录未配置或不存在,跳过拉取")
+            return
+
+        logging.info(f"正在从 NAS 拉取视频: {nas_dir} -> {target_dir}")
+        
+        # 查找所有 .mp4 文件
+        video_files = list(nas_dir.glob('*.mp4'))
+        if not video_files:
+            logging.info("NAS 目录中未找到视频文件")
+            return
+
+        import shutil
+        count = 0
+        for video_file in video_files:
+            if count >= 1:
+                logging.info("已达到单次拉取数量限制(1个),停止拉取")
+                break
+
+            target_file = target_dir / video_file.name
+            if not target_file.exists():
+                try:
+                    logging.info(f"复制文件: {video_file.name}")
+                    shutil.copy2(video_file, target_file)
+                    count += 1
+                except Exception as e:
+                    logging.error(f"复制失败 {video_file.name}: {e}")
+            else:
+                logging.debug(f"文件已存在,跳过: {video_file.name}")
+        
+        logging.info(f"✅ 从 NAS 拉取完成,新增 {count} 个视频")
 
     async def setup_account(self) -> bool:
         """设置账号登录 (支持 cookie 复用 + 验证缓存)"""
@@ -409,8 +465,14 @@ class VideoUploader:
             logging.error("❌ 登录失败,无法继续上传")
             logging.error("请检查网络连接或稍后重试")
             return
-        # 第二步: 生成所有元数据文件
-        logging.info("【第二步】生成元数据文件")
+            
+        # 第二步: 从 NAS 拉取视频
+        if self.config.NAS_DIR:
+            logging.info("【第二步】从 NAS 拉取视频")
+            self.fetch_from_nas(self.config.NAS_DIR, self.config.VIDEO_DIR)
+            
+        # 第三步: 生成所有元数据文件
+        logging.info("【第三步】生成元数据文件")
         metadata_files = self.generate_all_metadata()
         if not metadata_files:
             logging.info("没有需要上传的视频文件")
