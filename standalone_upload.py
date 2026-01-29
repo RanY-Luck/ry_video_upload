@@ -416,7 +416,7 @@ class VideoUploader:
         metadata_files = []
 
         for i, video_file in enumerate(video_files, 1):
-            logging.info(f"\n进度: [{i}/{len(video_files)}]")
+            logging.info(f"进度: [{i}/{len(video_files)}]")
             try:
                 metadata_file = self.generate_metadata_file(video_file)
                 metadata_files.append((video_file, metadata_file))
@@ -509,6 +509,13 @@ class VideoUploader:
 
         # 第五步: 批量上传
         logging.info("【第五步】批量上传")
+        
+        # 再次检查登录状态 (防止在人工审核期间 session 过期)
+        logging.info("正在验证登录状态...")
+        if not await self.setup_account():
+            logging.error("❌ 登录验证失败/已过期,且重新登录失败,无法继续")
+            return
+
         logging.info(f"📤 开始上传 {len(metadata_files)} 个视频...")
         success_count = 0
         fail_count = 0
