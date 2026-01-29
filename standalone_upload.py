@@ -5,6 +5,7 @@
 import json
 import asyncio
 import os
+import re
 import sys
 import dashscope
 from pathlib import Path
@@ -189,16 +190,31 @@ class VideoUploader:
                 logging.info("已达到单次拉取数量限制(1个),停止拉取")
                 break
 
-            target_file = target_dir / video_file.name
+            # 处理文件名: 去除特殊符号和空格
+            # 保留: 中文, 英文, 数字
+            stem = video_file.stem
+            suffix = video_file.suffix
+            
+            # 使用正则替换非中文、非字母、非数字的字符为空
+            new_stem = re.sub(r'[^\u4e00-\u9fa5a-zA-Z0-9]', '', stem)
+            
+            # 如果处理后文件名为空(全是特殊符号),则保留原名或使用默认名
+            if not new_stem:
+                logging.warning(f"文件名清洗后为空: {stem}, 使用原名")
+                new_stem = stem
+            
+            new_filename = f"{new_stem}{suffix}"
+            target_file = target_dir / new_filename
+
             if not target_file.exists():
                 try:
-                    logging.info(f"复制文件: {video_file.name}")
+                    logging.info(f"复制文件: {video_file.name} -> {new_filename}")
                     shutil.copy2(video_file, target_file)
                     count += 1
                 except Exception as e:
                     logging.error(f"复制失败 {video_file.name}: {e}")
             else:
-                logging.debug(f"文件已存在,跳过: {video_file.name}")
+                logging.debug(f"文件已存在,跳过: {new_filename}")
         
         logging.info(f"✅ 从 NAS 拉取完成,新增 {count} 个视频")
 
@@ -477,8 +493,8 @@ class VideoUploader:
         if not metadata_files:
             logging.info("没有需要上传的视频文件")
             return
-        # 第三步: 等待用户审核
-        logging.info("【第三步】人工审核")
+        # 第四步: 等待用户审核
+        logging.info("【第四步】人工审核")
         logging.info(f"✅ 已为 {len(metadata_files)} 个视频生成元数据文件")
         logging.info(f"📁 元数据文件位置: {self.config.VIDEO_DIR}")
         logging.info("📝 请检查并修改每个视频对应的 .txt 文件:")
@@ -491,8 +507,8 @@ class VideoUploader:
 
         input()  # 等待用户按回车
 
-        # 第四步: 批量上传
-        logging.info("【第四步】批量上传")
+        # 第五步: 批量上传
+        logging.info("【第五步】批量上传")
         logging.info(f"📤 开始上传 {len(metadata_files)} 个视频...")
         success_count = 0
         fail_count = 0
