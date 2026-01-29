@@ -441,7 +441,7 @@ class VideoUploader:
         success_count = 0
         fail_count = 0
         for i, (video_file, metadata_file) in enumerate(metadata_files, 1):
-            logging.info(f"\n进度: [{i}/{len(metadata_files)}]")
+            logging.info(f"进度: [{i}/{len(metadata_files)}]")
 
             try:
                 result = await self.upload_single_video(video_file, metadata_file)
