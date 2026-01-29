@@ -144,8 +144,8 @@ class DockerQRLogin:
         await self._simulate_human_behavior()
 
         # 保存页面加载后的全屏截图，用于调试
-        await self.page.screenshot(path="images/debug_page_load.png", full_page=True)
-        tencent_logger.info("[Docker登录] 已保存页面调试截图: images/debug_page_load.png")
+        await self.page.screenshot(path="images/tencent_load.png", full_page=True)
+        tencent_logger.info("[Docker登录] 已保存页面调试截图: images/tencent_load.png")
 
         # 等待页面加载
         await asyncio.sleep(3)
@@ -154,8 +154,8 @@ class DockerQRLogin:
 
         # 尝试读取已保存的全屏截图
         try:
-            if Path("images/debug_page_load.png").exists():
-                with open("images/debug_page_load.png", "rb") as f:
+            if Path("images/tencent_load.png").exists():
+                with open("images/tencent_load.png", "rb") as f:
                     image_data = f.read()
                 tencent_logger.info("[Docker登录] 成功读取全屏截图作为二维码图片")
                 # 返回空字符串作为 src，因为全屏截图没有单一的 URL
