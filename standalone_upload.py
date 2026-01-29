@@ -164,6 +164,36 @@ class VideoUploader:
             os.environ['DOCKER_ENV'] = 'true'
             logging.info("已设置环境变量 DOCKER_ENV=true")
 
+        # 初始化上传历史记录
+        self.history_file = Path('logs/uploaded_history.txt')
+        self.uploaded_history = self._load_history()
+
+    def _load_history(self) -> set:
+        """加载已上传视频的历史记录"""
+        history = set()
+        if self.history_file.exists():
+            try:
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            history.add(line)
+                logging.info(f"已加载 {len(history)} 条上传历史记录")
+            except Exception as e:
+                logging.error(f"加载历史记录失败: {e}")
+        return history
+
+    def _save_history(self, filename: str):
+        """保存上传记录"""
+        try:
+            # 确保目录存在
+            self.history_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.history_file, 'a', encoding='utf-8') as f:
+                f.write(f"{filename}\n")
+            self.uploaded_history.add(filename)
+        except Exception as e:
+            logging.error(f"保存历史记录失败: {e}")
+
     def fetch_from_nas(self, nas_dir: Path, target_dir: Path):
         """从 NAS 目录拉取视频文件到本地
         
@@ -204,6 +234,12 @@ class VideoUploader:
                 new_stem = stem
             
             new_filename = f"{new_stem}{suffix}"
+            
+            # 检查是否已上传过
+            if new_filename in self.uploaded_history:
+                logging.info(f"文件已在上传历史中,跳过: {new_filename}")
+                continue
+
             target_file = target_dir / new_filename
 
             if not target_file.exists():
@@ -390,7 +426,9 @@ class VideoUploader:
 
             logging.info(f"✅ 上传成功: {video_path.name}")
 
-            # 上传成功后删除视频和元数据文件
+            # 上传成功后保存记录并删除视频和元数据文件
+            self._save_history(video_path.name)
+            
             if self.config.DELETE_AFTER_UPLOAD:
                 video_path.unlink()
                 metadata_file.unlink()
@@ -405,7 +443,15 @@ class VideoUploader:
 
     def generate_all_metadata(self):
         """为所有视频生成元数据文件"""
-        video_files = list(self.config.VIDEO_DIR.glob('*.mp4'))
+        all_video_files = list(self.config.VIDEO_DIR.glob('*.mp4'))
+        
+        # 过滤已上传的视频
+        video_files = []
+        for v in all_video_files:
+            if v.name in self.uploaded_history:
+                logging.info(f"跳过已上传视频: {v.name}")
+            else:
+                video_files.append(v)
 
         if not video_files:
             logging.info("没有需要生成元数据的视频文件")
