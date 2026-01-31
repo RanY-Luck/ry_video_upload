@@ -8,12 +8,6 @@ from Upload.conf import LOCAL_CHROME_PATH
 from Upload.utils.base_social_media import set_init_script
 from Upload.utils.files_times import get_absolute_path
 from Upload.utils.log import tencent_logger
-from Upload.utils.image_uploader import ImageUploader
-from Upload.utils.bark_notifier import BarkNotifier
-from Upload.utils.bark_notifier import BarkNotifier
-from Upload.utils.config_loader import config
-from PIL import Image
-import io
 
 
 def is_docker_environment() -> bool:
@@ -128,7 +122,7 @@ async def cookie_auth(account_file):
 
             if not has_finder_username or not has_device_id:
                 tencent_logger.warning("[!] LocalStorage 缺少关键字段 (仅警告,继续尝试使用 Cookie)")
-
+            
         # ✅ 基础验证通过 (只要 Cookie 没过期且包含必要字段,就尝试使用)
         tencent_logger.success("[+] ✅ Cookie 文件初步验证通过")
         return True
@@ -223,6 +217,8 @@ class TencentVideo(object):
         self.category = category
         self.local_executable_path = LOCAL_CHROME_PATH
 
+
+
     async def handle_upload_error(self, page):
         tencent_logger.info("视频出错了，重新上传中")
         await page.locator('div.media-status-content div.tag-inner:has-text("删除")').click()
@@ -235,45 +231,28 @@ class TencentVideo(object):
         try:
             # 等待几秒让重定向发生
             await asyncio.sleep(3)
+            
             # 检测是否在登录页面
             # 1. URL 检查
             is_login_url = "/login" in page.url or page.url == "https://channels.weixin.qq.com/"
             # 2. 页面元素检查
             current_text = await page.content()
             has_login_text = "微信扫码" in current_text or "使用微信" in current_text
+            
             if is_login_url or has_login_text:
                 tencent_logger.warning("⚠️ 检测到需要登录 (Cookie失效或被重定向)")
                 tencent_logger.info("📱 请在浏览器中扫描二维码登录...")
-                # 发送 Bark 通知 (带截图)
+                
+                # 发送 Bark 通知 (如果配置了)
                 try:
-                    # 设置视口大小以确保裁切准确
-                    await page.set_viewport_size({"width": 1920, "height": 1080})
-
-                    # 截图并上传
-                    screenshot_bytes = await page.screenshot(full_page=True)
-                    # 裁切图片
-                    try:
-                        img = Image.open(io.BytesIO(screenshot_bytes))
-                        # 使用与 Docker 模式相同的坐标 (1330, 330, 1550, 570)
-                        cropped_img = img.crop((1330, 330, 1550, 570))
-                        img_byte_arr = io.BytesIO()
-                        cropped_img.save(img_byte_arr, format='PNG')
-                        final_bytes = img_byte_arr.getvalue()
-                        tencent_logger.info("已裁切二维码区域")
-                    except Exception as crop_err:
-                        tencent_logger.warning(f"裁切失败，使用全屏截图: {crop_err}")
-                        final_bytes = screenshot_bytes
-
-                    image_url = await ImageUploader.upload_to_imgbb(final_bytes)
-
+                    from Upload.utils.config_loader import config
+                    from Upload.utils.bark_notifier import BarkNotifier
                     notifier = BarkNotifier(config.bark_key)
                     notifier.send(
                         title="📱 需要手动扫码",
                         content="上传被重定向到登录页，请在服务器/浏览器扫码",
                         sound="alarm",
-                        level="timeSensitive",
-                        image=image_url,
-                        icon="https://api.iconify.design/mdi:qrcode-scan.svg"
+                        level="timeSensitive"
                     )
                 except Exception as e:
                     tencent_logger.debug(f"发送通知失败: {e}")
@@ -283,18 +262,18 @@ class TencentVideo(object):
                     if "channels.weixin.qq.com/platform" in page.url:
                         tencent_logger.success("✅ 检测到 URL 变更为后台地址，登录成功！")
                         break
-
+                    
                     # 检查昵称元素
                     if await page.locator("div.finder-nickname").count() > 0:
                         tencent_logger.success("✅ 检测到用户信息，登录成功！")
                         break
-
+                        
                     await asyncio.sleep(2)
-
+                
                 # 登录成功后保存 Cookie
                 await context.storage_state(path=f"{self.account_file}")
                 tencent_logger.info("💾 新的登录状态已保存")
-
+                
                 # 重新进入发布页面
                 await page.goto("https://channels.weixin.qq.com/platform/post/create")
                 await asyncio.sleep(3)
@@ -314,8 +293,10 @@ class TencentVideo(object):
         # 访问指定的 URL
         await page.goto("https://channels.weixin.qq.com/platform/post/create")
         tencent_logger.info(f'[+]正在上传-------{self.title}.mp4')
-        # 检测是否被重定向到登录页
+        
+        # 【新增】检测是否被重定向到登录页
         await self.handle_login_redirect(page, context)
+
         # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
         await page.wait_for_url("https://channels.weixin.qq.com/platform/post/create")
         # await page.wait_for_selector('input[type="file"]', timeout=10000)
@@ -331,11 +312,9 @@ class TencentVideo(object):
         await self.add_original(page)
         # 检测上传状态
         await self.detect_upload_status(page)
-        # 勾选定时发表
-        await self.add_publish_regularly(page)
         # 添加短标题
         await self.add_short_title(page)
-        # 点击发表
+
         await self.click_publish(page)
 
         await context.storage_state(path=f"{self.account_file}")  # 保存cookie
@@ -345,14 +324,6 @@ class TencentVideo(object):
         await context.close()
         await browser.close()
 
-    # 勾选定时发表
-    async def add_publish_regularly(self, page):
-        await page.locator("label.weui-desktop-form__check-label").filter(
-            has=page.get_by_text("定时", exact=True)
-        ).click()
-        tencent_logger.info("已勾选定时发表")
-
-    # 添加短标题
     async def add_short_title(self, page):
         short_title_element = page.get_by_text("短标题", exact=True).locator("..").locator(
             "xpath=following-sibling::div"
