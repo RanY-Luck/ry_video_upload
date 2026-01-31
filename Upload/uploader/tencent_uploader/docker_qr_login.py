@@ -16,6 +16,7 @@ from Upload.utils.bark_notifier import BarkNotifier
 from Upload.utils.base_social_media import set_init_script
 from Upload.utils.config_loader import config
 from Upload.utils.log import tencent_logger
+from Upload.utils.image_uploader import ImageUploader
 
 
 class DockerQRLogin:
@@ -64,40 +65,138 @@ class DockerQRLogin:
             '--disable-blink-features=AutomationControlled',  # 关键：禁用自动化控制特征
             '--disable-infobars',
             '--window-size=1920,1080',
+            '--no-first-run',
+            '--no-service-autorun',
+            '--password-store=basic',
         ]
 
         self.browser = await playwright.chromium.launch(
             headless=True,
-            args=args
+            args=args,
+            ignore_default_args=["--enable-automation"]  # 忽略默认的自动化参数
         )
 
-        # 使用自定义的 User-Agent
+        # 使用自定义的 User-Agent (Chrome 126)
+        user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+
         self.context = await self.browser.new_context(
             viewport={'width': 1920, 'height': 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            user_agent=user_agent,
             locale="zh-CN",
-            timezone_id="Asia/Shanghai"
+            timezone_id="Asia/Shanghai",
+            extra_http_headers={
+                "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-platform": '"Windows"',
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
         )
 
-        # 注入反爬脚本 (Stealth)
+        # 注入反爬脚本 (Stealth + Custom)
         await self.context.add_init_script(
             """
-                        Object.defineProperty(navigator, 'webdriver', {
-                            get: () => undefined
-                        });
-                        // 覆盖 chrome 对象
-                        window.chrome = {
-                            runtime: {}
-                        };
-                        // 覆盖 plugins
-                        Object.defineProperty(navigator, 'plugins', {
-                            get: () => [1, 2, 3, 4, 5]
-                        });
-                        // 覆盖 languages
-                        Object.defineProperty(navigator, 'languages', {
-                            get: () => ['zh-CN', 'zh']
-                        });
-                    """
+            // 1. Mask navigator.webdriver
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+
+            // 2. Mock window.chrome
+            window.chrome = {
+                runtime: {
+                    PlatformOs: {
+                        MAC: 'mac',
+                        WIN: 'win',
+                        ANDROID: 'android',
+                        CROS: 'cros',
+                        LINUX: 'linux',
+                        OPENBSD: 'openbsd',
+                    },
+                    PlatformArch: {
+                        ARM: 'arm',
+                        X86_32: 'x86-32',
+                        X86_64: 'x86-64',
+                    },
+                    PlatformNaclArch: {
+                        ARM: 'arm',
+                        X86_32: 'x86-32',
+                        X86_64: 'x86-64',
+                    },
+                    RequestUpdateCheckStatus: {
+                        THROTTLED: 'throttled',
+                        NO_UPDATE: 'no_update',
+                        UPDATE_AVAILABLE: 'update_available',
+                    },
+                    OnInstalledReason: {
+                        INSTALL: 'install',
+                        UPDATE: 'update',
+                        CHROME_UPDATE: 'chrome_update',
+                        SHARED_MODULE_UPDATE: 'shared_module_update',
+                    },
+                    OnRestartRequiredReason: {
+                        APP_UPDATE: 'app_update',
+                        OS_UPDATE: 'os_update',
+                        PERIODIC: 'periodic',
+                    }
+                },
+                loadTimes: function() {},
+                csi: function() {},
+                app: {
+                    isInstalled: false,
+                    InstallState: {
+                        DISABLED: 'disabled',
+                        INSTALLED: 'installed',
+                        NOT_INSTALLED: 'not_installed',
+                    },
+                    RunningState: {
+                        CANNOT_RUN: 'cannot_run',
+                        READY_TO_RUN: 'ready_to_run',
+                        RUNNING: 'running',
+                    }
+                }
+            };
+
+            // 3. Mock plugins
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => {
+                    var ChromePDFPlugin = {
+                        0: { type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format" },
+                        description: "Portable Document Format",
+                        filename: "internal-pdf-viewer",
+                        length: 1,
+                        name: "Chrome PDF Plugin"
+                    };
+                    var ChromePDFViewer = {
+                        0: { type: "application/pdf", suffixes: "pdf", description: "Portable Document Format" },
+                        description: "Portable Document Format",
+                        filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
+                        length: 1,
+                        name: "Chrome PDF Viewer"
+                    };
+                    var NativeClient = {
+                        0: { type: "application/x-nacl", suffixes: "", description: "Native Client Executable" },
+                        1: { type: "application/x-pnacl", suffixes: "", description: "Portable Native Client Executable" },
+                        description: "",
+                        filename: "internal-nacl-plugin",
+                        length: 2,
+                        name: "Native Client"
+                    };
+                    return [ChromePDFPlugin, ChromePDFViewer, NativeClient];
+                }
+            });
+
+            // 4. Mock languages
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['zh-CN', 'zh', 'en']
+            });
+            
+            // 5. Mask permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+            );
+            """
         )
 
         self.context = await set_init_script(self.context)
@@ -191,14 +290,11 @@ class DockerQRLogin:
 
         # 等待页面加载
         await asyncio.sleep(3)
-
         image_data = None
-
-        # 尝试读取已保存的全屏截图并进行随机裁剪
         try:
             if Path(original_screenshot_path).exists():
-                # 🎲 随机裁剪图片
-                tencent_logger.info("[Docker登录] 开始随机裁剪二维码图片...")
+                # 裁剪图片
+                tencent_logger.info("[Docker登录] 开始裁剪二维码图片...")
                 image_data = self.crop_qr_code(
                     original_screenshot_path,
                     "images/tencent_load_cropped.png"
@@ -209,58 +305,7 @@ class DockerQRLogin:
         except Exception as e:
             tencent_logger.error(f"[Docker登录] 读取或裁剪截图失败: {e}")
 
-        # # 如果连全屏截图都没有
-        # tencent_logger.error("[Docker登录] 无法获取任何图片，保存失败截图和页面源码")
-        # await self.page.screenshot(path="debug_qr_failed.png")
-
-        # 保存获取到的图片用于调试
-        # if image_data:
-        #     with open("images/debug_qr_element.png", "wb") as f:
-        #         f.write(image_data)
-        #     tencent_logger.info("[Docker登录] 二维码图片已保存至 debug_qr_element.png")
-
         return image_data, ""
-
-    async def upload_image_to_imgbb(self, image_data: bytes, api_key: str) -> Optional[str]:
-        """
-        上传图片到 imgbb 图床
-        
-        Args:
-            image_data: 图片二进制数据
-            api_key: imgbb API Key
-            
-        Returns:
-            公网可访问的图片 URL
-        """
-        tencent_logger.info("[Docker登录] 正在上传二维码到 imgbb 图床...")
-
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                # imgbb 需要 base64 编码
-                image_base64 = base64.b64encode(image_data).decode('utf-8')
-
-                response = await client.post(
-                    "https://api.imgbb.com/1/upload",
-                    data={
-                        'key': api_key,
-                        'image': image_base64,
-                        'name': 'wechat_qrcode'
-                    }
-                )
-
-                result = response.json()
-
-                if result.get('success'):
-                    url = result['data']['url']
-                    tencent_logger.info(f"[Docker登录] 图片上传成功: {url}")
-                    return url
-                else:
-                    tencent_logger.error(f"[Docker登录] imgbb 上传失败: {result}")
-                    return None
-
-        except Exception as e:
-            tencent_logger.error(f"[Docker登录] imgbb 上传异常: {e}")
-            return None
 
     def send_qr_via_bark(self, image_url: str) -> bool:
         """
@@ -427,8 +472,11 @@ class DockerQRLogin:
                 return False
 
             # Step 3: 上传到图床
-            imgbb_key = config.get('IMGBB_API_KEY')
-            image_url = await self.upload_image_to_imgbb(qr_image, imgbb_key)
+            cropped_file_path = "images/tencent_load_cropped.png"
+            if Path(cropped_file_path).exists():
+                tencent_logger.info(f"[Docker登录] 准备上传图片: {cropped_file_path}")
+            
+            image_url = await ImageUploader.upload_to_imgbb(qr_image)
 
             if not image_url:
                 self.notify_login_failed("二维码上传图床失败")
