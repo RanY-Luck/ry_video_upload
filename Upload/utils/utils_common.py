@@ -42,6 +42,10 @@ def setup_logging(
     Returns:
         配置好的 logger 实例
     """
+    # 确保日志文件所在的目录存在
+    log_path = Path(log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
     # 创建文件处理器
     file_handler = RotatingFileHandler(
         log_file,
@@ -75,7 +79,7 @@ def setup_logging(
 
 def get_project_root() -> Path:
     """获取项目根目录
-    
+
     Returns:
         项目根目录的绝对路径
     """
@@ -84,7 +88,7 @@ def get_project_root() -> Path:
 
 def get_upload_dir() -> Path:
     """获取 Upload 目录
-    
+
     Returns:
         Upload 目录的绝对路径
     """
