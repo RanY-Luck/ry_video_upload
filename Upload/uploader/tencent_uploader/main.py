@@ -260,61 +260,6 @@ class TencentVideo(object):
         file_input = page.locator('input[type="file"]')
         await file_input.set_input_files(self.file_path)
 
-    async def handle_login_redirect(self, page, context):
-        """检测并处理登录重定向"""
-        try:
-            # 等待几秒让重定向发生
-            await asyncio.sleep(3)
-            
-            # 检测是否在登录页面
-            # 1. URL 检查
-            is_login_url = "/login" in page.url or page.url == "https://channels.weixin.qq.com/"
-            # 2. 页面元素检查
-            current_text = await page.content()
-            has_login_text = "微信扫码" in current_text or "使用微信" in current_text
-            
-            if is_login_url or has_login_text:
-                tencent_logger.warning("⚠️ 检测到需要登录 (Cookie失效或被重定向)")
-                tencent_logger.info("📱 请在浏览器中扫描二维码登录...")
-                
-                # 发送 Bark 通知 (如果配置了)
-                try:
-                    from Upload.utils.config_loader import config
-                    from Upload.utils.bark_notifier import BarkNotifier
-                    notifier = BarkNotifier(config.bark_key)
-                    notifier.send(
-                        title="📱 需要手动扫码",
-                        content="上传被重定向到登录页，请在服务器/浏览器扫码",
-                        sound="alarm",
-                        level="timeSensitive"
-                    )
-                except Exception as e:
-                    tencent_logger.debug(f"发送通知失败: {e}")
-
-                # 循环等待直到登录成功
-                while True:
-                    if "channels.weixin.qq.com/platform" in page.url:
-                        tencent_logger.success("✅ 检测到 URL 变更为后台地址，登录成功！")
-                        break
-                    
-                    # 检查昵称元素
-                    if await page.locator("div.finder-nickname").count() > 0:
-                        tencent_logger.success("✅ 检测到用户信息，登录成功！")
-                        break
-                        
-                    await asyncio.sleep(2)
-                
-                # 登录成功后保存 Cookie
-                await context.storage_state(path=f"{self.account_file}")
-                tencent_logger.info("💾 新的登录状态已保存")
-                
-                # 重新进入发布页面
-                await page.goto("https://channels.weixin.qq.com/platform/post/create")
-                await asyncio.sleep(3)
-
-        except Exception as e:
-            tencent_logger.error(f"处理登录重定向时出错: {e}")
-
     async def upload(self, playwright: Playwright) -> None:
         # 使用 Chromium (这里使用系统内浏览器，用chromium 会造成h264错误
         browser = await playwright.chromium.launch(headless=False, executable_path=self.local_executable_path)
@@ -327,10 +272,6 @@ class TencentVideo(object):
         # 访问指定的 URL
         await page.goto("https://channels.weixin.qq.com/platform/post/create")
         tencent_logger.info(f'[+]正在上传-------{self.title}.mp4')
-        
-        # 【新增】检测是否被重定向到登录页
-        await self.handle_login_redirect(page, context)
-
         # 等待页面跳转到指定的 URL，没进入，则自动等待到超时
         await page.wait_for_url("https://channels.weixin.qq.com/platform/post/create")
         # await page.wait_for_selector('input[type="file"]', timeout=10000)
