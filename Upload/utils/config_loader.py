@@ -156,10 +156,6 @@ class ConfigLoader:
         """视频分类"""
         return self.get('VIDEO_CATEGORY', 'CUTE_PETS')
 
-    @property
-    def publish_date(self) -> int:
-        """发布时间"""
-        return self.get_int('PUBLISH_DATE', 0)
 
     @property
     def delete_after_upload(self) -> bool:

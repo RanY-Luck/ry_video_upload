@@ -84,7 +84,7 @@ async def main():
         elif args.platform == SOCIAL_MEDIA_TENCENT:
             await weixin_setup(account_file, handle=True)
             category = TencentZoneTypes.LIFESTYLE.value  # 标记原创需要否则不需要传
-            app = TencentVideo(title, video_file, tags, publish_date, account_file, category)
+            app = TencentVideo(title, video_file, tags, account_file, category)
         elif args.platform == SOCIAL_MEDIA_KUAISHOU:
             await ks_setup(account_file, handle=True)
             app = KSVideo(title, video_file, tags, publish_date, account_file)

@@ -209,49 +209,15 @@ async def weixin_setup(account_file, handle=False):
 
 
 class TencentVideo(object):
-    def __init__(self, title, file_path, tags, publish_date: datetime, account_file, category=None):
+    def __init__(self, title, file_path, tags, account_file, category=None):
         self.title = title  # 视频标题
         self.file_path = file_path
         self.tags = tags
-        self.publish_date = publish_date
         self.account_file = account_file
         self.category = category
         self.local_executable_path = LOCAL_CHROME_PATH
 
-    async def set_schedule_time_tencent(self, page, publish_date):
-        label_element = page.locator("label").filter(has_text="定时").nth(1)
-        await label_element.click()
 
-        await page.click('input[placeholder="请选择发表时间"]')
-
-        str_month = str(publish_date.month) if publish_date.month > 9 else "0" + str(publish_date.month)
-        current_month = str_month + "月"
-        # 获取当前的月份
-        page_month = await page.inner_text('span.weui-desktop-picker__panel__label:has-text("月")')
-
-        # 检查当前月份是否与目标月份相同
-        if page_month != current_month:
-            await page.click('button.weui-desktop-btn__icon__right')
-
-        # 获取页面元素
-        elements = await page.query_selector_all('table.weui-desktop-picker__table a')
-
-        # 遍历元素并点击匹配的元素
-        for element in elements:
-            if 'weui-desktop-picker__disabled' in await element.evaluate('el => el.className'):
-                continue
-            text = await element.inner_text()
-            if text.strip() == str(publish_date.day):
-                await element.click()
-                break
-
-        # 输入小时部分（假设选择11小时）
-        await page.click('input[placeholder="请选择时间"]')
-        await page.keyboard.press("Control+KeyA")
-        await page.keyboard.type(str(publish_date.hour))
-
-        # 选择标题栏（令定时时间生效）
-        await page.locator("div.input-editor").click()
 
     async def handle_upload_error(self, page):
         tencent_logger.info("视频出错了，重新上传中")
@@ -346,8 +312,6 @@ class TencentVideo(object):
         await self.add_original(page)
         # 检测上传状态
         await self.detect_upload_status(page)
-        if self.publish_date != 0:
-            await self.set_schedule_time_tencent(page, self.publish_date)
         # 添加短标题
         await self.add_short_title(page)
 

@@ -92,7 +92,6 @@ class Uploader:
             title=title,
             file_path=file_path,
             tags=tags,
-            publish_date=0,
             account_file=account_file,
             category=TencentZoneTypes.CUTE_PETS.value
         )

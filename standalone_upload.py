@@ -38,7 +38,7 @@ class StandaloneUploadConfig:
 
         # 从配置文件加载上传配置
         self.CATEGORY = config.upload_category
-        self.PUBLISH_DATE = config.publish_date
+
         self.DELETE_AFTER_UPLOAD = config.delete_after_upload
 
         # 新增配置
@@ -281,7 +281,15 @@ class VideoUploader:
 
             if not target_file.exists():
                 # 获取文件大小 (MB)
-                file_size_mb = video_file.stat().st_size / (1024 * 1024)
+                file_size = video_file.stat().st_size
+                file_size_mb = file_size / (1024 * 1024)
+
+                logging.info(f"正在检查视频: {video_file.name}")
+
+                # 预先检查文件大小,跳过过小的文件(可能是未下载完成或损坏的文件)
+                if file_size < 1024 * 1024:  # 小于 1MB
+                    logging.warning(f"文件过小({file_size_mb:.2f} MB), 跳过: {video_file.name}")
+                    continue
 
                 # 获取视频宽度
                 width = self.scan_video_width(video_file)
@@ -476,7 +484,6 @@ class VideoUploader:
                 title=title,
                 file_path=video_path,
                 tags=tags,
-                publish_date=self.config.PUBLISH_DATE,
                 account_file=self.config.ACCOUNT_FILE,
                 category=self.config.CATEGORY
             )
