@@ -4,24 +4,57 @@
 """
 import time
 import json
+import shutil
 import asyncio
 import os
 import re
+import cv2
 import sys
 import dashscope
+import traceback
 from pathlib import Path
+from dashscope import MultiModalConversation
 from typing import Dict
 from Upload.utils.log import logger as logging
 from Upload.utils.utils_common import setup_project_paths, setup_logging
 from Upload.uploader.tencent_uploader.main import TencentVideo
 from Upload.utils.bark_notifier import BarkNotifier
 from Upload.utils.config_loader import config
+from Upload.uploader.tencent_uploader.main import weixin_setup
+from contextlib import contextmanager
+from Upload.uploader.tencent_uploader.main import cookie_auth
 
 # 设置项目路径
 setup_project_paths()
 
 # 配置日志
 logger = setup_logging('logs/standalone_upload.log')
+
+
+@contextmanager
+def suppress_stderr():
+    """Suppress stderr/stdout from C libraries"""
+    try:
+        # Save stderr
+        original_stderr_fd = 2  # Standard stderr fd
+        saved_stderr_fd = os.dup(original_stderr_fd)
+
+        # Open devnull
+        devnull = os.open(os.devnull, os.O_WRONLY)
+
+        # Replace stderr with devnull
+        os.dup2(devnull, original_stderr_fd)
+
+        try:
+            yield
+        finally:
+            # Restore stderr
+            os.dup2(saved_stderr_fd, original_stderr_fd)
+            os.close(saved_stderr_fd)
+            os.close(devnull)
+    except Exception:
+        # If any OS error, just run the code
+        yield
 
 
 class StandaloneUploadConfig:
@@ -41,7 +74,7 @@ class StandaloneUploadConfig:
 
         self.DELETE_AFTER_UPLOAD = config.delete_after_upload
 
-        # 新增配置
+        # nas目录配置
         self.NAS_DIR = config.nas_dir
         self.DOCKER_MODE = config.docker_mode
 
@@ -89,8 +122,6 @@ class AIAnalyzer:
         for attempt in range(1, max_retries + 1):
             try:
                 logging.info(f"AI 分析视频: {video_path.name} (第 {attempt}/{max_retries} 次尝试)")
-
-                from dashscope import MultiModalConversation
 
                 messages = [
                     {
@@ -189,8 +220,8 @@ class VideoUploader:
             int: 视频宽度, 如果获取失败则返回 0
         """
         try:
-            import cv2
-            cap = cv2.VideoCapture(str(video_path))
+            with suppress_stderr():
+                cap = cv2.VideoCapture(str(video_path))
             if not cap.isOpened():
                 return 0
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -247,9 +278,6 @@ class VideoUploader:
         if not video_files:
             logging.info("NAS 目录中未找到视频文件")
             return
-
-        import shutil
-        import sys
 
         count = 0
         for video_file in video_files:
@@ -326,9 +354,6 @@ class VideoUploader:
             logging.info(f"正在检查账号文件: {self.config.ACCOUNT_FILE.absolute()}")
             if self.config.ACCOUNT_FILE.exists():
                 logging.info("检测到已保存的登录状态,正在验证 cookie 有效性...")
-                
-                # 导入 cookie_auth 函数
-                from Upload.uploader.tencent_uploader.main import cookie_auth
 
                 # 验证 cookie 是否有效
                 is_valid = await cookie_auth(str(self.config.ACCOUNT_FILE))
@@ -347,7 +372,7 @@ class VideoUploader:
 
             # 使用 weixin_setup 进行扫码登录
             # handle=True 会打开浏览器进行扫码
-            from Upload.uploader.tencent_uploader.main import weixin_setup
+
             success = await weixin_setup(str(self.config.ACCOUNT_FILE), handle=True)
 
             if success:
@@ -359,7 +384,6 @@ class VideoUploader:
 
         except Exception as e:
             logging.error(f"❌ 账号设置失败: {e}")
-            import traceback
             logging.error(traceback.format_exc())
             return False
 
@@ -596,7 +620,21 @@ class VideoUploader:
         # 第二步: 从 NAS 拉取视频
         if self.config.NAS_DIR:
             logging.info("【第二步】从 NAS 拉取视频")
-            self.fetch_from_nas(self.config.NAS_DIR, self.config.VIDEO_DIR)
+
+            # 检查本地是否已有待上传的视频 (MP4 + TXT)
+            existing_videos = list(self.config.VIDEO_DIR.glob('*.mp4'))
+            pending_videos = []
+            for v in existing_videos:
+                metadata_path = v.with_suffix('.txt')
+                if metadata_path.exists() and v.name not in self.uploaded_history:
+                    pending_videos.append(v)
+
+            if pending_videos:
+                logging.info(f"本地已有 {len(pending_videos)} 个待上传视频 (已含元数据), 跳过从 NAS 拉取")
+                for v in pending_videos:
+                    logging.info(f"  - {v.name}")
+            else:
+                self.fetch_from_nas(self.config.NAS_DIR, self.config.VIDEO_DIR)
 
         # 第三步: 生成所有元数据文件
         logging.info("【第三步】生成元数据文件")
@@ -615,8 +653,6 @@ class VideoUploader:
         logging.info("✅ 修改完成后,按回车键继续上传...")
         # 发送审核提醒
         self.notify_manual_review(len(metadata_files))
-
-        input()  # 等待用户按回车
 
         # 第五步: 批量上传
         logging.info("【第五步】批量上传")
