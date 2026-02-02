@@ -34,7 +34,7 @@ class DockerQRLogin:
     def __init__(self, account_file: Path, timeout: int = 180):
         """
         初始化 Docker 登录器
-        
+
         Args:
             account_file: 账号文件保存路径
             timeout: 等待扫码超时时间（秒）
@@ -188,7 +188,7 @@ class DockerQRLogin:
             Object.defineProperty(navigator, 'languages', {
                 get: () => ['zh-CN', 'zh', 'en']
             });
-            
+
             // 5. Mask permissions
             const originalQuery = window.navigator.permissions.query;
             window.navigator.permissions.query = (parameters) => (
@@ -222,11 +222,11 @@ class DockerQRLogin:
     def crop_qr_code(self, image_path: str, output_path: str = None) -> bytes:
         """
         随机裁剪二维码图片,用于调试
-        
+
         Args:
             image_path: 原始图片路径
             output_path: 裁剪后图片保存路径(可选)
-            
+
         Returns:
             裁剪后的图片二进制数据
         """
@@ -269,7 +269,7 @@ class DockerQRLogin:
     async def get_qr_code_image(self) -> Tuple[bytes, str]:
         """
         获取登录二维码图片
-        
+
         Returns:
             Tuple[bytes, str]: (图片二进制数据, 二维码 src URL)
         """
@@ -310,10 +310,10 @@ class DockerQRLogin:
     def send_qr_via_bark(self, image_url: str) -> bool:
         """
         通过 Bark 发送二维码图片推送
-        
+
         Args:
             image_url: 公网可访问的二维码图片 URL
-            
+
         Returns:
             推送是否成功
         """
@@ -348,7 +348,7 @@ class DockerQRLogin:
     async def wait_for_login(self) -> bool:
         """
         轮询检测登录状态
-        
+
         Returns:
             是否登录成功
         """
@@ -397,7 +397,7 @@ class DockerQRLogin:
     async def save_login_state(self) -> bool:
         """
         保存登录状态到账号文件
-        
+
         Returns:
             是否保存成功
         """
@@ -446,7 +446,7 @@ class DockerQRLogin:
     async def docker_login(self) -> bool:
         """
         Docker 环境完整登录流程
-        
+
         流程:
         1. 初始化 headless 浏览器
         2. 获取二维码截图
@@ -454,7 +454,7 @@ class DockerQRLogin:
         4. 通过 Bark 推送
         5. 轮询等待登录
         6. 保存 cookie
-        
+
         Returns:
             登录是否成功
         """
@@ -475,7 +475,7 @@ class DockerQRLogin:
             cropped_file_path = "images/tencent_load_cropped.png"
             if Path(cropped_file_path).exists():
                 tencent_logger.info(f"[Docker登录] 准备上传图片: {cropped_file_path}")
-            
+
             image_url = await ImageUploader.upload_to_imgbb(qr_image)
 
             if not image_url:
@@ -514,11 +514,11 @@ class DockerQRLogin:
 async def docker_qr_login(account_file: Path, timeout: int = 180) -> bool:
     """
     Docker 环境二维码登录便捷函数
-    
+
     Args:
         account_file: 账号文件路径
         timeout: 超时时间（秒）
-        
+
     Returns:
         登录是否成功
     """

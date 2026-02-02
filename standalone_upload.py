@@ -71,7 +71,7 @@ class StandaloneUploadConfig:
 
         # 从配置文件加载上传配置
         self.CATEGORY = config.upload_category
-        self.PUBLISH_DATE = config.publish_date
+
         self.DELETE_AFTER_UPLOAD = config.delete_after_upload
 
         # nas目录配置
@@ -108,11 +108,11 @@ class AIAnalyzer:
 
     def analyze_video(self, video_path: Path, original_title: str = "") -> Dict[str, str]:
         """使用 AI 分析视频,生成标题和标签 (带重试机制)
-        
+
         Args:
             video_path: 视频文件路径
             original_title: 原始标题 (可选)
-        
+
         Returns:
             包含 title 和 tag 的字典
         """
@@ -212,10 +212,10 @@ class VideoUploader:
 
     def scan_video_width(self, video_path: Path) -> int:
         """获取视频宽度
-        
+
         Args:
             video_path: 视频文件路径
-            
+
         Returns:
             int: 视频宽度, 如果获取失败则返回 0
         """
@@ -262,7 +262,7 @@ class VideoUploader:
 
     def fetch_from_nas(self, nas_dir: Path, target_dir: Path):
         """从 NAS 目录拉取视频文件到本地
-        
+
         Args:
             nas_dir: NAS 目录路径
             target_dir: 本地目标目录
@@ -309,7 +309,15 @@ class VideoUploader:
 
             if not target_file.exists():
                 # 获取文件大小 (MB)
-                file_size_mb = video_file.stat().st_size / (1024 * 1024)
+                file_size = video_file.stat().st_size
+                file_size_mb = file_size / (1024 * 1024)
+
+                logging.info(f"正在检查视频: {video_file.name}")
+
+                # 预先检查文件大小,跳过过小的文件(可能是未下载完成或损坏的文件)
+                if file_size < 1024 * 1024:  # 小于 1MB
+                    logging.warning(f"文件过小({file_size_mb:.2f} MB), 跳过: {video_file.name}")
+                    continue
 
                 # 获取视频宽度
                 width = self.scan_video_width(video_file)
@@ -381,10 +389,10 @@ class VideoUploader:
 
     def generate_metadata_file(self, video_path: Path) -> Path:
         """为视频生成元数据文件 (标题和标签)
-        
+
         Args:
             video_path: 视频文件路径
-        
+
         Returns:
             元数据文件路径
         """
@@ -437,10 +445,10 @@ class VideoUploader:
 
     def read_metadata_file(self, metadata_file: Path) -> Dict[str, any]:
         """读取元数据文件
-        
+
         Args:
             metadata_file: 元数据文件路径
-        
+
         Returns:
             包含 title 和 tags 的字典
         """
@@ -475,11 +483,11 @@ class VideoUploader:
 
     async def upload_single_video(self, video_path: Path, metadata_file: Path) -> bool:
         """上传单个视频
-        
+
         Args:
             video_path: 视频文件路径
             metadata_file: 元数据文件路径
-        
+
         Returns:
             上传是否成功
         """
@@ -500,7 +508,6 @@ class VideoUploader:
                 title=title,
                 file_path=video_path,
                 tags=tags,
-                publish_date=self.config.PUBLISH_DATE,
                 account_file=self.config.ACCOUNT_FILE,
                 category=self.config.CATEGORY
             )

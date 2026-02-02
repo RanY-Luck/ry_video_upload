@@ -19,12 +19,12 @@ import io
 def is_docker_environment() -> bool:
     """
     检测是否在 Docker 环境中运行
-    
+
     检测方式:
     1. 检查 /.dockerenv 文件是否存在
     2. 检查环境变量 DOCKER_ENV
     3. 检查 /proc/1/cgroup 中是否包含 docker
-    
+
     Returns:
         bool: True 表示在 Docker 环境中
     """
@@ -69,12 +69,12 @@ def format_str_for_short_title(origin_title: str) -> str:
 
 async def cookie_auth(account_file):
     """验证 cookie 和登录状态是否有效
-    
+
     优化后的验证策略:
     1. 只验证 Cookie 文件的完整性和过期时间
     2. 不进行实际页面访问验证(避免触发微信风控)
     3. 真正的登录验证会在上传时进行(使用有头浏览器,不会触发风控)
-    
+
     Returns:
         bool: True 表示 Cookie 文件有效, False 表示需要重新登录
     """
@@ -167,16 +167,16 @@ async def get_tencent_cookie(account_file):
 
 async def weixin_setup(account_file, handle=False):
     """设置视频号账号登录
-    
+
     由于视频号的安全机制,每次上传都需要重新验证身份
     因此直接打开浏览器进行扫码登录
-    
+
     在 Docker 环境中,会通过 Bark 推送二维码到手机
-    
+
     Args:
         account_file: 账号文件路径
         handle: 是否自动处理登录流程
-    
+
     Returns:
         bool: 登录是否成功
     """

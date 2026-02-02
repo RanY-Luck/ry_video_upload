@@ -1,13 +1,13 @@
-
 import asyncio
 from pathlib import Path
 from Upload.uploader.tencent_uploader.main import TencentVideo
 from Upload.utils.config_loader import config
 
 # 配置测试参数
-VIDEO_PATH = r"F:\gitpush\ry_video_upload\Upload\videos\test_video.mp4" # 修改为您要测试的视频路径
+VIDEO_PATH = r"F:\gitpush\ry_video_upload\Upload\videos\test_video.mp4"  # 修改为您要测试的视频路径
 TITLE = "测试标题"
 TAGS = ["测试标签1", "测试标签2"]
+
 
 async def debug_upload():
     video_path = Path(VIDEO_PATH)
@@ -25,7 +25,7 @@ async def debug_upload():
         return
 
     print(f"开始调试上传: {video_path}")
-    
+
     # 实例化上传器
     uploader = TencentVideo(
         title=TITLE,
@@ -38,13 +38,14 @@ async def debug_upload():
     # 启动 Playwright 并开始上传
     # 注意: upload 方法内部已经包含了 browser.launch(headless=False)
     # 所以会弹出浏览器窗口，方便您观察
-    
+
     # 为了方便调试，您可以修改 TencentVideo.upload 方法，
     # 在关键步骤加入 await page.pause() 来暂停执行，打开 Playwright 检查器
-    
+
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
         await uploader.upload(p)
+
 
 if __name__ == "__main__":
     try:

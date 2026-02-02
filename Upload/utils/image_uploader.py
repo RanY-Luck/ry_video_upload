@@ -9,6 +9,7 @@ from typing import Optional
 from Upload.utils.log import tencent_logger
 from Upload.utils.config_loader import config
 
+
 class ImageUploader:
     """图片上传类"""
 
@@ -16,17 +17,17 @@ class ImageUploader:
     async def upload_to_imgbb(image_data: bytes, api_key: str = None) -> Optional[str]:
         """
         上传图片到 imgbb 图床
-        
+
         Args:
             image_data: 图片二进制数据
             api_key: imgbb API Key (如果未提供，尝试从配置获取)
-            
+
         Returns:
             公网可访问的图片 URL
         """
         if not api_key:
             api_key = config.get('IMGBB_API_KEY')
-        
+
         if not api_key:
             tencent_logger.warning("未配置 IMGBB_API_KEY，无法上传图片")
             return None
