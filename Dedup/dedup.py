@@ -40,7 +40,12 @@ class VideoConfig:
     """
     def __init__(self):
         # GPU加速
-        self.enable_gpu: bool = False  # 是否启用 GPU 加速
+        self.enable_gpu: bool = True  # 是否启用 GPU 加速
+
+        # 视频加速与随机镜像
+        self.enable_speed_change: bool = True               # 是否启用视频加速
+        self.speed_change_range: tuple = (1.05, 1.15)       # 随机加速范围
+        self.enable_random_flip: bool = False               # 是否启用随机水平镜像（覆盖 flip_horizontal） - 设为False以强制使用flip_horizontal
 
         # 字幕参数
         self.include_subtitles: bool = False                # 是否添加字幕
@@ -52,7 +57,7 @@ class VideoConfig:
         self.subtitles_duration: int = 5                    # 字幕持续时间（秒），视频时长超过此值时添加字幕。
 
         # 标题参数
-        self.include_titles: bool = False                   # 是否添加标题
+        self.include_titles: bool = True                   # 是否添加标题
         self.titles_opacity: float = 0.10                   # 标题透明度，范围0-1
         self.top_title: str = 'YANQU'                       # 顶部标题文本
         self.top_title_margin: int = 5                      # 顶部标题与顶部的间隙百分比，范围 0-100。
@@ -65,8 +70,8 @@ class VideoConfig:
         self.watermark_opacity: float = 0.06                        # 水印透明度，范围0-1，文字0.10，图片视频0.05
         self.watermark_direction: str = 'random'                    # 水印移动方向
         self.watermark_color: str = 'white'                         # 水印颜色，支持颜色名称或 HEX 码。
-        self.watermark_text: str = 'YANQU'                          # 水印文本内容
-        self.watermark_type: str = 'image'                          # 水印类型，根据类型设置对应路径，text、image、video。
+        self.watermark_text: str = '暖心守护人'                     # 水印文本内容
+        self.watermark_type: str = 'text'                           # 水印类型，根据类型设置对应路径，text、image、video。
         self.watermark_image_path: str = 'assets/watermark.png'     # 图片水印文件路径，当 watermark_type 为 'image' 时使用。
         self.watermark_video_path: str = ''                         # 视频水印文件路径，当 watermark_type 为 'video' 时使用。
 
@@ -89,8 +94,8 @@ class VideoConfig:
         self.background_music_volume: float = 0.1           # 背景音乐音量，范围0-1。
 
         # 视频镜像与旋转
-        self.flip_horizontal: bool = False                  # 是否启用水平镜像
-        self.rotation_angle: int = -6                       # 旋转角度（度），建议值 -3 到 3。
+        self.flip_horizontal: bool = True                   # 是否启用水平镜像 (enable_random_flip=False时生效)
+        self.rotation_angle: int = -3                       # 旋转角度（度），建议值 -3 到 3。
 
         # 视频裁剪
         self.crop_percentage: float = 0.1                   # 裁剪百分比，范围 0-0.5，例如 0.1 表示裁剪每边 10% 的区域。
@@ -221,6 +226,12 @@ class VideoConfig:
         # 视频镜像与旋转
         if not isinstance(self.flip_horizontal, bool):
             raise ValueError("flip_horizontal 必须是布尔值")
+        if not isinstance(self.enable_random_flip, bool):
+            raise ValueError("enable_random_flip 必须是布尔值")
+        if not isinstance(self.enable_speed_change, bool):
+            raise ValueError("enable_speed_change 必须是布尔值")
+        if not isinstance(self.speed_change_range, tuple) or len(self.speed_change_range) != 2:
+            raise ValueError("speed_change_range 必须是包含两个浮点数的元组")
         if not isinstance(self.rotation_angle, (int, float)):
             raise ValueError("rotation_angle 必须是数字")
 
@@ -1080,6 +1091,17 @@ class VideoHandler:
         subtitles_file = None
 
         try:
+            # 随机决定是否水平镜像
+            if self.config.enable_random_flip:
+                self.config.flip_horizontal = random.choice([True, False])
+                logging.info(f"随机水平镜像: {'启用' if self.config.flip_horizontal else '禁用'}")
+
+            # 随机决定视频加速倍率
+            speed_factor = 1.0
+            if self.config.enable_speed_change:
+                speed_factor = random.uniform(*self.config.speed_change_range)
+                logging.info(f"随机视频加速倍率: {speed_factor:.3f}")
+
             # 预处理图片水印大小
             if self.config.watermark_type == 'image' and self.watermark_img:
                 wm_width = width // 5
@@ -1122,6 +1144,14 @@ class VideoHandler:
                     audio_stream = ffmpeg.input(mixed_audio_path)
                 else:
                     audio_stream = ffmpeg.input(processed_audio_path)
+                
+                # 应用音频加速滤镜
+                if speed_factor != 1.0:
+                    try:
+                        audio_stream = audio_stream.filter('atempo', speed_factor)
+                        logging.info(f"应用音频加速滤镜: atempo={speed_factor:.3f}")
+                    except Exception as e:
+                        logging.warning(f"应用音频加速滤镜失败: {e}，将使用原速音频")
 
             # 定义帧交换索引映射函数
             def get_original_idx(output_idx, interval, total_frames):
@@ -1156,7 +1186,7 @@ class VideoHandler:
 
             # 分批处理视频帧
             processed_frame_generator = self._process_frames(frame_generator, total_frames, fps, height, width)
-            self._write_frames(processed_frame_generator, output_path, width, height, fps, audio_stream)
+            self._write_frames(processed_frame_generator, output_path, width, height, fps, audio_stream, speed_factor)
 
         finally:
             cap.release()
@@ -1283,7 +1313,7 @@ class VideoHandler:
         return (frame_idx, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
     def _write_frames(self, frame_generator: Generator[np.ndarray, None, None], output_path: str, 
-                      width: int, height: int, fps: float, audio_stream: ffmpeg.Stream) -> None:
+                      width: int, height: int, fps: float, audio_stream: ffmpeg.Stream, speed_factor: float = 1.0) -> None:
         """
         将处理后的帧写入输出视频。
 
@@ -1306,7 +1336,7 @@ class VideoHandler:
             output = ffmpeg.output(
                 video_stream, audio_stream, output_path, 
                 vcodec='libx264', acodec='aac', preset='fast', 
-                crf=23, r=fps, s=f'{adjusted_width}x{adjusted_height}',
+                crf=23, r=fps * speed_factor, s=f'{adjusted_width}x{adjusted_height}',
                 **{'b:v': '2M'}
             )
         else:
@@ -1314,7 +1344,7 @@ class VideoHandler:
             output = video_stream.output(
                 output_path, 
                 vcodec='libx264', preset='fast', 
-                crf=23, r=fps, s=f'{adjusted_width}x{adjusted_height}',
+                crf=23, r=fps * speed_factor, s=f'{adjusted_width}x{adjusted_height}',
                 **{'b:v': '2M'}
             )
         
@@ -1328,9 +1358,9 @@ class VideoHandler:
 
 if __name__ == "__main__":
     # 创建命令行参数解析器
-    parser = argparse.ArgumentParser(description="python dedup.py -i input.mp4 -o output.mp4")
-    parser.add_argument("-i", "--input", required=True, help="输入视频文件路径")
-    parser.add_argument("-o", "--output", required=True, help="输出视频文件路径")
+    parser = argparse.ArgumentParser(description="python3 dedup.py -i input.mp4 -o output.mp4")
+    parser.add_argument("-i", "--input", default="input.mp4", help="输入视频文件路径 (默认: input.mp4)")
+    parser.add_argument("-o", "--output", default="output.mp4", help="输出视频文件路径 (默认: output.mp4)")
     
     # 解析命令行参数
     args = parser.parse_args()

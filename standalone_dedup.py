@@ -112,37 +112,53 @@ class StandaloneDedupProcessor:
             logging.info(f"输出文件: {output_file}")
             logging.info("=" * 60)
 
-            # 让 FFmpeg 的输出直接显示到控制台
-            process = subprocess.Popen(
-                [
-                    sys.executable,
-                    str(self.config.DEDUP_SCRIPT),
-                    "-i", str(input_file),
-                    "-o", str(output_file)
-                ],
-                cwd=self.config.DEDUP_DIR,
-                stdout=None,  # 直接输出到控制台
-                stderr=None,  # 直接输出到控制台
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == 'nt' else 0
-            )
+            # 动态导入去重模块
+            try:
+                from Dedup.dedup import VideoConfig, VideoHandler
+            except ImportError:
+                # 尝试添加当前目录到 sys.path
+                import sys
+                sys.path.append(str(Path.cwd()))
+                from Dedup.dedup import VideoConfig, VideoHandler
 
-            process.wait()
+            # 初始化配置
+            dedup_config = VideoConfig()
+            
+            # 修正相对路径为绝对路径 (基于 DEDUP_DIR)
+            # 因为 dedup.py 默认使用相对路径 (assets/...), 在 standalone_dedup.py 中运行需要基于 Dedup 目录
+            dedup_base = self.config.DEDUP_DIR
+            
+            def fix_path(p):
+                return str(dedup_base / p) if p and not Path(p).is_absolute() else p
 
-            if process.returncode == 0:
-                logging.info("=" * 60)
-                logging.info(f"✅ 去重成功: {input_file.name}")
-                logging.info("=" * 60)
-                self._save_processed_file(str(input_file))
-                return True
-            else:
-                logging.error("=" * 60)
-                logging.error(f"❌ 去重失败: {input_file.name}, 返回码: {process.returncode}")
-                logging.error("=" * 60)
-                return False
+            dedup_config.font_file = fix_path(dedup_config.font_file)
+            dedup_config.background_music_file = fix_path(dedup_config.background_music_file)
+            dedup_config.watermark_image_path = fix_path(dedup_config.watermark_image_path)
+            dedup_config.watermark_video_path = fix_path(dedup_config.watermark_video_path)
+            dedup_config.hzh_video_file = fix_path(dedup_config.hzh_video_file)
+            dedup_config.subtitles_file = fix_path(dedup_config.subtitles_file)
+
+            # 强制使用配置的去重参数 (如果需要从 dedup.py 默认值覆盖，可以在这里设置)
+            # 目前 dedup.py 的默认值已经是我们在之前步骤修改过的 (warmark='text', forced flip)
+
+            logging.info("初始化视频处理器 (直接集成模式)...")
+            handler = VideoHandler(dedup_config)
+            
+            # 执行处理
+            handler.process_video(str(input_file), str(output_file))
+
+            logging.info("=" * 60)
+            logging.info(f"✅ 去重成功: {input_file.name}")
+            logging.info("=" * 60)
+            self._save_processed_file(str(input_file))
+            return True
 
         except Exception as e:
             logging.error("=" * 60)
-            logging.error(f"❌ 处理视频异常: {input_file.name} -> {e}")
+            logging.error(f"❌ 处理视频异常: {input_file.name}")
+            logging.error(f"错误详情: {e}")
+            import traceback
+            logging.error(traceback.format_exc())
             logging.error("=" * 60)
             return False
 
