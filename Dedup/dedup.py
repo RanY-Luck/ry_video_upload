@@ -45,7 +45,7 @@ class VideoConfig:
         # 视频加速与随机镜像
         self.enable_speed_change: bool = True               # 是否启用视频加速
         self.speed_change_range: tuple = (1.05, 1.15)       # 随机加速范围
-        self.enable_random_flip: bool = False               # 是否启用随机水平镜像（覆盖 flip_horizontal） - 设为False以强制使用flip_horizontal
+        self.enable_random_flip: bool = True               # 是否启用随机水平镜像（覆盖 flip_horizontal） - 设为False以强制使用flip_horizontal
 
         # 字幕参数
         self.include_subtitles: bool = False                # 是否添加字幕
@@ -140,6 +140,58 @@ class VideoConfig:
         self.enable_texture_noise: bool = False             # 是否启用纹理噪声
         self.texture_noise_strength: float = 0.5            # 纹理噪声强度，范围 0-1，默认 0.5
         self.enable_blur_edge: bool = True                  # 是否启用边缘模糊
+
+        # ========== 2025年新增去重增强功能 ==========
+        
+        # 元数据清洗参数
+        self.enable_metadata_clean: bool = True             # 是否清洗视频元数据
+        self.randomize_creation_time: bool = True           # 是否随机化创建时间
+        
+        # 音频指纹扰乱参数
+        self.enable_audio_fingerprint_disrupt: bool = True  # 是否启用音频指纹扰乱
+        self.pitch_shift_semitones: float = 0.3             # 音高偏移半音数，建议 0.1-0.5
+        self.add_subliminal_noise: bool = True              # 是否添加极低音量噪声
+        self.subliminal_noise_volume: float = 0.01          # 极低噪声音量，范围 0-0.05
+        self.add_random_silence: bool = True                # 是否添加随机极短静音
+        self.random_silence_duration_ms: int = 20           # 随机静音时长（毫秒），建议 10-50
+        
+        # 感知哈希扰乱参数
+        self.enable_hash_disruption: bool = True            # 是否启用感知哈希扰乱
+        self.hash_disruption_pixels: int = 2                # 边缘随机像素线宽度，建议 1-3
+        self.hash_disruption_blocks: int = 5                # 随机色块数量，建议 3-10
+        self.hash_disruption_block_size: int = 3            # 随机色块大小（像素），建议 2-5
+        
+        # 贴纸叠加参数
+        self.enable_sticker: bool = False                   # 是否启用贴纸叠加
+        self.sticker_folder: str = 'assets/stickers/'       # 贴纸文件夹路径
+        self.sticker_opacity: float = 0.7                   # 贴纸透明度，范围 0-1
+        self.sticker_scale_range: tuple = (0.08, 0.15)      # 贴纸大小范围（占画面比例）
+        self.sticker_change_interval: int = 60              # 贴纸切换间隔（帧），0表示不切换
+        self.sticker_position: str = 'corner'               # 贴纸位置：corner（四角随机）、random（完全随机）
+        
+        # 动态边框参数
+        self.enable_dynamic_border: bool = True             # 是否启用动态边框
+        self.border_width: int = 3                          # 边框宽度（像素），建议 2-8
+        self.border_style: str = 'gradient'                 # 边框样式：solid（纯色）、gradient（渐变）、rainbow（彩虹）
+        self.border_color_start: str = '#FF6B6B'            # 渐变起始颜色
+        self.border_color_end: str = '#4ECDC4'              # 渐变结束颜色
+        
+        # 暗角效果参数
+        self.enable_vignette: bool = True                   # 是否启用暗角效果
+        self.vignette_strength: float = 0.3                 # 暗角强度，范围 0-1
+        self.vignette_radius: float = 0.8                   # 暗角半径，范围 0.5-1.5
+        
+        # 时间轴随机化参数
+        self.enable_timeline_randomize: bool = True         # 是否启用时间轴随机化
+        self.add_intro_frames: int = 3                      # 添加片头帧数量，建议 1-5
+        self.add_outro_frames: int = 3                      # 添加片尾帧数量，建议 1-5
+        self.intro_outro_color: str = 'black'               # 片头片尾颜色：black、white、blur（模糊首尾帧）
+        self.frame_drop_ratio: float = 0.003                # 随机丢帧比例，建议 0.001-0.01
+        self.frame_duplicate_ratio: float = 0.002           # 随机复制帧比例，建议 0.001-0.005
+        
+        # DCT域扰动参数
+        self.enable_dct_perturbation: bool = True           # 是否启用DCT域扰动
+        self.dct_noise_strength: float = 0.02               # DCT噪声强度，范围 0.01-0.1
 
     def validate(self):
         """
@@ -305,6 +357,74 @@ class VideoConfig:
         if not isinstance(self.enable_blur_edge, bool):
             raise ValueError("enable_blur_edge 必须是布尔值")
 
+        # ========== 2025年新增参数验证 ==========
+        
+        # 元数据清洗
+        if not isinstance(self.enable_metadata_clean, bool):
+            raise ValueError("enable_metadata_clean 必须是布尔值")
+        if not isinstance(self.randomize_creation_time, bool):
+            raise ValueError("randomize_creation_time 必须是布尔值")
+        
+        # 音频指纹扰乱
+        if not isinstance(self.enable_audio_fingerprint_disrupt, bool):
+            raise ValueError("enable_audio_fingerprint_disrupt 必须是布尔值")
+        if not 0 <= self.pitch_shift_semitones <= 2:
+            raise ValueError("pitch_shift_semitones 必须在 0 到 2 之间")
+        if not isinstance(self.add_subliminal_noise, bool):
+            raise ValueError("add_subliminal_noise 必须是布尔值")
+        if not 0 <= self.subliminal_noise_volume <= 0.1:
+            raise ValueError("subliminal_noise_volume 必须在 0 到 0.1 之间")
+        
+        # 感知哈希扰乱
+        if not isinstance(self.enable_hash_disruption, bool):
+            raise ValueError("enable_hash_disruption 必须是布尔值")
+        if not 1 <= self.hash_disruption_pixels <= 5:
+            raise ValueError("hash_disruption_pixels 必须在 1 到 5 之间")
+        if not 0 <= self.hash_disruption_blocks <= 20:
+            raise ValueError("hash_disruption_blocks 必须在 0 到 20 之间")
+        
+        # 贴纸叠加
+        if not isinstance(self.enable_sticker, bool):
+            raise ValueError("enable_sticker 必须是布尔值")
+        if not 0 <= self.sticker_opacity <= 1:
+            raise ValueError("sticker_opacity 必须在 0 到 1 之间")
+        if self.sticker_position not in ['corner', 'random']:
+            raise ValueError("sticker_position 必须是 'corner' 或 'random'")
+        
+        # 动态边框
+        if not isinstance(self.enable_dynamic_border, bool):
+            raise ValueError("enable_dynamic_border 必须是布尔值")
+        if not 0 <= self.border_width <= 20:
+            raise ValueError("border_width 必须在 0 到 20 之间")
+        if self.border_style not in ['solid', 'gradient', 'rainbow']:
+            raise ValueError("border_style 必须是 'solid', 'gradient' 或 'rainbow'")
+        
+        # 暗角效果
+        if not isinstance(self.enable_vignette, bool):
+            raise ValueError("enable_vignette 必须是布尔值")
+        if not 0 <= self.vignette_strength <= 1:
+            raise ValueError("vignette_strength 必须在 0 到 1 之间")
+        if not 0.3 <= self.vignette_radius <= 2:
+            raise ValueError("vignette_radius 必须在 0.3 到 2 之间")
+        
+        # 时间轴随机化
+        if not isinstance(self.enable_timeline_randomize, bool):
+            raise ValueError("enable_timeline_randomize 必须是布尔值")
+        if not 0 <= self.add_intro_frames <= 30:
+            raise ValueError("add_intro_frames 必须在 0 到 30 之间")
+        if not 0 <= self.add_outro_frames <= 30:
+            raise ValueError("add_outro_frames 必须在 0 到 30 之间")
+        if not 0 <= self.frame_drop_ratio <= 0.05:
+            raise ValueError("frame_drop_ratio 必须在 0 到 0.05 之间")
+        if not 0 <= self.frame_duplicate_ratio <= 0.05:
+            raise ValueError("frame_duplicate_ratio 必须在 0 到 0.05 之间")
+        
+        # DCT域扰动
+        if not isinstance(self.enable_dct_perturbation, bool):
+            raise ValueError("enable_dct_perturbation 必须是布尔值")
+        if not 0 <= self.dct_noise_strength <= 0.5:
+            raise ValueError("dct_noise_strength 必须在 0 到 0.5 之间")
+
         # 验证文件路径
         paths_to_check = [
             (self.background_music_file, "背景音乐文件"),
@@ -448,6 +568,100 @@ class AudioHandler:
         except Exception as e:
             logging.error(f"背景音乐混合失败: {str(e)}")
             raise
+
+class AudioFingerprintDisruptor:
+    """
+    音频指纹扰乱类，用于干扰平台的音频指纹检测算法（如 Acoustid/Chromaprint）。
+    通过音高偏移、添加极低音量噪声、随机静音插入等方式实现。
+    """
+    
+    @staticmethod
+    def disrupt_audio(audio_path: str, config: VideoConfig) -> str:
+        """
+        对音频进行指纹扰乱处理。
+        
+        参数:
+            audio_path: 输入音频文件路径
+            config: 视频处理配置对象
+            
+        返回:
+            str: 处理后的音频文件路径
+        """
+        if not config.enable_audio_fingerprint_disrupt:
+            return audio_path
+            
+        try:
+            audio = AudioSegment.from_file(audio_path)
+            
+            # 1. 音高偏移（通过改变采样率实现）
+            if config.pitch_shift_semitones > 0:
+                # 计算变调因子：每个半音是 2^(1/12) ≈ 1.0595
+                shift_direction = random.choice([1, -1])
+                semitones = config.pitch_shift_semitones * shift_direction
+                pitch_factor = 2 ** (semitones / 12.0)
+                
+                # 改变采样率来实现变调
+                new_sample_rate = int(audio.frame_rate * pitch_factor)
+                audio = audio._spawn(audio.raw_data, overrides={
+                    'frame_rate': new_sample_rate
+                })
+                # 恢复原采样率（改变播放速度恢复正常）
+                audio = audio.set_frame_rate(44100)
+                logging.info(f"音频音高偏移: {semitones:.2f} 半音")
+            
+            # 2. 添加极低音量噪声
+            if config.add_subliminal_noise:
+                duration_ms = len(audio)
+                # 生成白噪声
+                noise_samples = np.random.normal(0, 1, int(audio.frame_rate * duration_ms / 1000))
+                # 转换为 int16
+                noise_samples = (noise_samples * 32767 * config.subliminal_noise_volume).astype(np.int16)
+                # 创建噪声音频段
+                noise_audio = AudioSegment(
+                    noise_samples.tobytes(),
+                    frame_rate=audio.frame_rate,
+                    sample_width=2,
+                    channels=1
+                )
+                # 如果原音频是立体声，转换噪声为立体声
+                if audio.channels == 2:
+                    noise_audio = AudioSegment.from_mono_audiosegments(noise_audio, noise_audio)
+                # 调整噪声长度
+                noise_audio = noise_audio[:len(audio)]
+                # 叠加噪声
+                audio = audio.overlay(noise_audio)
+                logging.info(f"已添加极低音量噪声，音量: {config.subliminal_noise_volume}")
+            
+            # 3. 随机插入极短静音
+            if config.add_random_silence:
+                # 每隔一段时间插入一个极短静音
+                silence = AudioSegment.silent(duration=config.random_silence_duration_ms)
+                output_audio = AudioSegment.silent(duration=0)
+                chunk_size = random.randint(5000, 15000)  # 5-15秒随机
+                
+                pos = 0
+                insert_count = 0
+                while pos < len(audio):
+                    end_pos = min(pos + chunk_size, len(audio))
+                    output_audio += audio[pos:end_pos]
+                    if end_pos < len(audio):
+                        output_audio += silence
+                        insert_count += 1
+                    pos = end_pos
+                    chunk_size = random.randint(5000, 15000)
+                
+                audio = output_audio
+                logging.info(f"已插入 {insert_count} 个随机静音段，每段 {config.random_silence_duration_ms}ms")
+            
+            # 导出处理后的音频
+            output_path = tempfile.mktemp(suffix='.wav')
+            audio.export(output_path, format='wav')
+            logging.info(f"音频指纹扰乱完成，输出到 {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logging.error(f"音频指纹扰乱失败: {str(e)}")
+            return audio_path
 
 class SubtitleHandler:
     """字幕处理类，用于生成和添加字幕"""
@@ -1041,6 +1255,322 @@ class VideoEffects:
         blurred = cv2.GaussianBlur(edges, (21, 21), 0)
         return cv2.addWeighted(frame, 0.9, cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR), 0.1, 0)
 
+    # ========== 2025年新增去重增强效果 ==========
+    
+    @staticmethod
+    def apply_hash_disruption(frame: np.ndarray, config: VideoConfig, frame_idx: int) -> np.ndarray:
+        """
+        应用感知哈希扰乱效果，通过在边缘添加随机像素和色块干扰pHash/dHash算法。
+
+        参数:
+            frame: 当前视频帧
+            config: 视频处理配置对象
+            frame_idx: 当前帧索引
+
+        返回:
+            np.ndarray: 应用感知哈希扰乱后的帧
+        """
+        if not config.enable_hash_disruption:
+            return frame
+        
+        h, w = frame.shape[:2]
+        frame = frame.copy()  # 避免修改原帧
+        
+        # 1. 在边缘添加随机彩色像素线
+        pixel_width = config.hash_disruption_pixels
+        
+        # 顶部边缘
+        for i in range(pixel_width):
+            for j in range(w):
+                if random.random() < 0.3:  # 30% 概率改变像素
+                    frame[i, j] = [random.randint(0, 255) for _ in range(3)]
+        
+        # 底部边缘
+        for i in range(h - pixel_width, h):
+            for j in range(w):
+                if random.random() < 0.3:
+                    frame[i, j] = [random.randint(0, 255) for _ in range(3)]
+        
+        # 左右边缘
+        for i in range(h):
+            for j in range(pixel_width):
+                if random.random() < 0.3:
+                    frame[i, j] = [random.randint(0, 255) for _ in range(3)]
+            for j in range(w - pixel_width, w):
+                if random.random() < 0.3:
+                    frame[i, j] = [random.randint(0, 255) for _ in range(3)]
+        
+        # 2. 在非显著区域添加半透明微小色块
+        for _ in range(config.hash_disruption_blocks):
+            # 随机选择边角区域
+            corner = random.choice(['tl', 'tr', 'bl', 'br'])
+            block_size = config.hash_disruption_block_size
+            
+            if corner == 'tl':
+                x = random.randint(pixel_width, w // 4)
+                y = random.randint(pixel_width, h // 4)
+            elif corner == 'tr':
+                x = random.randint(3 * w // 4, w - block_size - pixel_width)
+                y = random.randint(pixel_width, h // 4)
+            elif corner == 'bl':
+                x = random.randint(pixel_width, w // 4)
+                y = random.randint(3 * h // 4, h - block_size - pixel_width)
+            else:  # br
+                x = random.randint(3 * w // 4, w - block_size - pixel_width)
+                y = random.randint(3 * h // 4, h - block_size - pixel_width)
+            
+            # 确保坐标有效
+            x = max(0, min(x, w - block_size))
+            y = max(0, min(y, h - block_size))
+            
+            # 随机颜色和透明度
+            color = np.array([random.randint(0, 255) for _ in range(3)], dtype=np.uint8)
+            alpha = random.uniform(0.1, 0.3)
+            
+            # 半透明叠加
+            roi = frame[y:y+block_size, x:x+block_size]
+            blended = cv2.addWeighted(roi, 1 - alpha, np.full_like(roi, color), alpha, 0)
+            frame[y:y+block_size, x:x+block_size] = blended
+        
+        return frame
+
+    @staticmethod
+    def apply_vignette(frame: np.ndarray, config: VideoConfig) -> np.ndarray:
+        """
+        应用暗角效果，模拟电影质感。
+
+        参数:
+            frame: 当前视频帧
+            config: 视频处理配置对象
+
+        返回:
+            np.ndarray: 应用暗角效果后的帧
+        """
+        if not config.enable_vignette:
+            return frame
+        
+        h, w = frame.shape[:2]
+        
+        # 创建暗角遮罩
+        Y, X = np.ogrid[:h, :w]
+        center_x, center_y = w / 2, h / 2
+        
+        # 计算到中心的归一化距离
+        dist_from_center = np.sqrt((X - center_x) ** 2 + (Y - center_y) ** 2)
+        max_dist = np.sqrt(center_x ** 2 + center_y ** 2)
+        dist_normalized = dist_from_center / max_dist
+        
+        # 应用暗角衰减
+        vignette_mask = 1 - config.vignette_strength * (dist_normalized / config.vignette_radius) ** 2
+        vignette_mask = np.clip(vignette_mask, 0, 1)
+        
+        # 扩展到3通道
+        vignette_mask = np.dstack([vignette_mask] * 3)
+        
+        # 应用暗角
+        frame = (frame.astype(np.float32) * vignette_mask).astype(np.uint8)
+        
+        return frame
+
+    @staticmethod
+    def apply_dynamic_border(frame: np.ndarray, config: VideoConfig, frame_idx: int, total_frames: int) -> np.ndarray:
+        """
+        应用动态边框效果。
+
+        参数:
+            frame: 当前视频帧
+            config: 视频处理配置对象
+            frame_idx: 当前帧索引
+            total_frames: 视频总帧数
+
+        返回:
+            np.ndarray: 应用动态边框后的帧
+        """
+        if not config.enable_dynamic_border or config.border_width <= 0:
+            return frame
+        
+        h, w = frame.shape[:2]
+        bw = config.border_width
+        
+        # 解析颜色
+        def hex_to_bgr(hex_color):
+            hex_color = hex_color.lstrip('#')
+            r, g, b = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+            return (b, g, r)
+        
+        progress = frame_idx / max(total_frames, 1)
+        
+        if config.border_style == 'solid':
+            color = hex_to_bgr(config.border_color_start)
+            frame[:bw, :] = color  # 顶部
+            frame[-bw:, :] = color  # 底部
+            frame[:, :bw] = color  # 左边
+            frame[:, -bw:] = color  # 右边
+            
+        elif config.border_style == 'gradient':
+            # 渐变颜色
+            start_color = np.array(hex_to_bgr(config.border_color_start), dtype=np.float32)
+            end_color = np.array(hex_to_bgr(config.border_color_end), dtype=np.float32)
+            
+            # 随时间变化的渐变
+            t = (np.sin(progress * 2 * np.pi) + 1) / 2  # 0-1之间波动
+            current_color = tuple((start_color * (1 - t) + end_color * t).astype(np.uint8).tolist())
+            
+            frame[:bw, :] = current_color
+            frame[-bw:, :] = current_color
+            frame[:, :bw] = current_color
+            frame[:, -bw:] = current_color
+            
+        elif config.border_style == 'rainbow':
+            # 彩虹色，随时间变化
+            hue = int((progress * 180) % 180)
+            hsv_color = np.array([[[hue, 255, 255]]], dtype=np.uint8)
+            bgr_color = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2BGR)[0][0]
+            color = tuple(bgr_color.tolist())
+            
+            frame[:bw, :] = color
+            frame[-bw:, :] = color
+            frame[:, :bw] = color
+            frame[:, -bw:] = color
+        
+        return frame
+
+    @staticmethod
+    def apply_sticker(frame: np.ndarray, config: VideoConfig, frame_idx: int, sticker_cache: dict) -> np.ndarray:
+        """
+        在视频帧上添加贴纸效果。
+
+        参数:
+            frame: 当前视频帧
+            config: 视频处理配置对象
+            frame_idx: 当前帧索引
+            sticker_cache: 贴纸缓存字典
+
+        返回:
+            np.ndarray: 添加贴纸后的帧
+        """
+        if not config.enable_sticker:
+            return frame
+        
+        # 检查贴纸文件夹
+        if not os.path.exists(config.sticker_folder):
+            return frame
+        
+        # 获取贴纸文件列表
+        sticker_files = [f for f in os.listdir(config.sticker_folder) 
+                        if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif'))]
+        if not sticker_files:
+            return frame
+        
+        h, w = frame.shape[:2]
+        
+        # 根据间隔决定是否切换贴纸
+        if config.sticker_change_interval > 0:
+            sticker_idx = (frame_idx // config.sticker_change_interval) % len(sticker_files)
+        else:
+            sticker_idx = sticker_cache.get('sticker_idx', 0)
+            if 'sticker_idx' not in sticker_cache:
+                sticker_cache['sticker_idx'] = random.randint(0, len(sticker_files) - 1)
+                sticker_idx = sticker_cache['sticker_idx']
+        
+        sticker_file = os.path.join(config.sticker_folder, sticker_files[sticker_idx])
+        
+        try:
+            # 加载贴纸
+            sticker = Image.open(sticker_file).convert('RGBA')
+            
+            # 计算贴纸大小
+            scale = random.uniform(*config.sticker_scale_range)
+            sticker_w = int(w * scale)
+            sticker_h = int(sticker.height * sticker_w / sticker.width)
+            sticker = sticker.resize((sticker_w, sticker_h), Image.Resampling.LANCZOS)
+            
+            # 确定贴纸位置
+            margin = 10
+            if config.sticker_position == 'corner':
+                corner = random.choice(['tl', 'tr', 'bl', 'br'])
+                if corner == 'tl':
+                    x, y = margin, margin
+                elif corner == 'tr':
+                    x, y = w - sticker_w - margin, margin
+                elif corner == 'bl':
+                    x, y = margin, h - sticker_h - margin
+                else:
+                    x, y = w - sticker_w - margin, h - sticker_h - margin
+            else:  # random
+                x = random.randint(margin, w - sticker_w - margin)
+                y = random.randint(margin, h - sticker_h - margin)
+            
+            # 确保坐标有效
+            x = max(0, min(x, w - sticker_w))
+            y = max(0, min(y, h - sticker_h))
+            
+            # 转换帧为PIL图像
+            pil_frame = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)).convert('RGBA')
+            
+            # 调整贴纸透明度
+            sticker_array = np.array(sticker)
+            sticker_array[:, :, 3] = (sticker_array[:, :, 3] * config.sticker_opacity).astype(np.uint8)
+            sticker = Image.fromarray(sticker_array)
+            
+            # 叠加贴纸
+            pil_frame.paste(sticker, (x, y), sticker)
+            
+            # 转回OpenCV格式
+            frame = cv2.cvtColor(np.array(pil_frame.convert('RGB')), cv2.COLOR_RGB2BGR)
+            
+        except Exception as e:
+            logging.warning(f"贴纸加载失败: {e}")
+        
+        return frame
+
+    @staticmethod
+    def apply_dct_perturbation(frame: np.ndarray, config: VideoConfig) -> np.ndarray:
+        """
+        应用DCT域扰动，在离散余弦变换域添加微小噪声。
+
+        参数:
+            frame: 当前视频帧
+            config: 视频处理配置对象
+
+        返回:
+            np.ndarray: 应用DCT扰动后的帧
+        """
+        if not config.enable_dct_perturbation:
+            return frame
+        
+        # 转换为浮点数
+        frame_float = frame.astype(np.float32)
+        
+        # 对每个通道进行DCT扰动
+        channels = cv2.split(frame_float)
+        perturbed_channels = []
+        
+        for channel in channels:
+            # DCT变换
+            dct = cv2.dct(channel)
+            
+            # 在高频分量添加噪声（避免低频分量影响整体外观）
+            h, w = dct.shape
+            noise = np.zeros_like(dct)
+            # 只在高频区域添加噪声
+            noise[h//4:, w//4:] = np.random.uniform(
+                -config.dct_noise_strength * 255,
+                config.dct_noise_strength * 255,
+                (h - h//4, w - w//4)
+            )
+            dct += noise
+            
+            # 逆DCT变换
+            idct = cv2.idct(dct)
+            perturbed_channels.append(idct)
+        
+        # 合并通道
+        frame = cv2.merge(perturbed_channels)
+        frame = np.clip(frame, 0, 255).astype(np.uint8)
+        
+        return frame
+
 class VideoHandler:
     """
     视频处理主类，协调音频和视频的处理流程。
@@ -1056,6 +1586,7 @@ class VideoHandler:
         self.config.validate()
         self.subs = None        # 字幕对象，延迟到 process_video 中加载
         self.batch_size = min(100, max(10, os.cpu_count() * 10))  # 动态调整
+        self.sticker_cache = {}  # 贴纸缓存
 
         # 预加载图片水印
         self.watermark_img = None
@@ -1138,6 +1669,13 @@ class VideoHandler:
                 audio_stream.output(audio_path, format='wav').run(overwrite_output=True)
                 processed_audio_path = AudioHandler.remove_silence(audio_path, self.config)
                 temp_files.append(processed_audio_path)
+                
+                # 2025新增：音频指纹扰乱
+                if self.config.enable_audio_fingerprint_disrupt:
+                    disrupted_audio_path = AudioFingerprintDisruptor.disrupt_audio(processed_audio_path, self.config)
+                    temp_files.append(disrupted_audio_path)
+                    processed_audio_path = disrupted_audio_path
+                
                 if self.config.include_background_music and self.config.background_music_file and os.path.exists(self.config.background_music_file):
                     mixed_audio_path = AudioHandler.mix_bgm(processed_audio_path, self.config.background_music_file, self.config.background_music_volume)
                     temp_files.append(mixed_audio_path)
@@ -1152,6 +1690,7 @@ class VideoHandler:
                         logging.info(f"应用音频加速滤镜: atempo={speed_factor:.3f}")
                     except Exception as e:
                         logging.warning(f"应用音频加速滤镜失败: {e}，将使用原速音频")
+
 
             # 定义帧交换索引映射函数
             def get_original_idx(output_idx, interval, total_frames):
@@ -1310,6 +1849,13 @@ class VideoHandler:
         frame = VideoEffects.apply_gaussian_blur(frame, config, frame_idx)
         frame = VideoEffects.apply_fade_effect(frame, config, frame_idx, total_frames)
         
+        # ========== 2025年新增去重增强效果 ==========
+        frame = VideoEffects.apply_hash_disruption(frame, config, frame_idx)  # 感知哈希扰乱
+        frame = VideoEffects.apply_vignette(frame, config)  # 暗角效果
+        frame = VideoEffects.apply_dynamic_border(frame, config, frame_idx, total_frames)  # 动态边框
+        frame = VideoEffects.apply_sticker(frame, config, frame_idx, self.sticker_cache)  # 贴纸叠加
+        frame = VideoEffects.apply_dct_perturbation(frame, config)  # DCT域扰动
+        
         return (frame_idx, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
     def _write_frames(self, frame_generator: Generator[np.ndarray, None, None], output_path: str, 
@@ -1331,11 +1877,13 @@ class VideoHandler:
                                     s=f'{adjusted_width}x{adjusted_height}', framerate=fps)
         
         # 根据是否有音频流选择不同的输出配置
+        # 使用 yuv420p 像素格式和 high profile 确保最佳兼容性
         if audio_stream is not None:
             # 有音频流时，同时输出视频和音频
             output = ffmpeg.output(
                 video_stream, audio_stream, output_path, 
                 vcodec='libx264', acodec='aac', preset='fast', 
+                pix_fmt='yuv420p', profile='high',
                 crf=23, r=fps * speed_factor, s=f'{adjusted_width}x{adjusted_height}',
                 **{'b:v': '2M'}
             )
@@ -1343,18 +1891,84 @@ class VideoHandler:
             # 无音频流时，只输出视频（不设置 acodec）
             output = video_stream.output(
                 output_path, 
-                vcodec='libx264', preset='fast', 
+                vcodec='libx264', preset='fast',
+                pix_fmt='yuv420p', profile='high',
                 crf=23, r=fps * speed_factor, s=f'{adjusted_width}x{adjusted_height}',
                 **{'b:v': '2M'}
             )
         
         process = output.overwrite_output().run_async(pipe_stdin=True)
+        
+        # ========== 2025新增：时间轴随机化 - 片头帧 ==========
+        if self.config.enable_timeline_randomize and self.config.add_intro_frames > 0:
+            intro_frame = self._generate_intro_outro_frame(first_frame, self.config.intro_outro_color)
+            for _ in range(self.config.add_intro_frames):
+                process.stdin.write(intro_frame.tobytes())
+            logging.info(f"已添加 {self.config.add_intro_frames} 个片头帧")
+        
+        # 写入第一帧
         process.stdin.write(first_frame.tobytes())
+        
+        # 写入后续帧（支持随机丢帧和复制帧）
+        last_frame = first_frame
+        frame_count = 1
+        dropped_count = 0
+        duplicated_count = 0
+        
         for frame in frame_generator:
+            # 时间轴随机化：随机丢帧
+            if self.config.enable_timeline_randomize and self.config.frame_drop_ratio > 0:
+                if random.random() < self.config.frame_drop_ratio:
+                    dropped_count += 1
+                    continue  # 跳过此帧
+            
             process.stdin.write(frame.tobytes())
+            frame_count += 1
+            
+            # 时间轴随机化：随机复制帧
+            if self.config.enable_timeline_randomize and self.config.frame_duplicate_ratio > 0:
+                if random.random() < self.config.frame_duplicate_ratio:
+                    process.stdin.write(frame.tobytes())
+                    duplicated_count += 1
+            
+            last_frame = frame
+        
+        # ========== 2025新增：时间轴随机化 - 片尾帧 ==========
+        if self.config.enable_timeline_randomize and self.config.add_outro_frames > 0:
+            outro_frame = self._generate_intro_outro_frame(last_frame, self.config.intro_outro_color)
+            for _ in range(self.config.add_outro_frames):
+                process.stdin.write(outro_frame.tobytes())
+            logging.info(f"已添加 {self.config.add_outro_frames} 个片尾帧")
+        
+        if dropped_count > 0 or duplicated_count > 0:
+            logging.info(f"时间轴随机化: 丢弃 {dropped_count} 帧, 复制 {duplicated_count} 帧")
+        
         process.stdin.close()
         process.wait()
         logging.info(f"视频处理完成，输出到 {output_path}")
+
+    def _generate_intro_outro_frame(self, reference_frame: np.ndarray, color_mode: str) -> np.ndarray:
+        """
+        生成片头或片尾帧。
+
+        参数:
+            reference_frame: 参考帧（用于获取尺寸和blur模式）
+            color_mode: 颜色模式 - 'black', 'white', 'blur'
+
+        返回:
+            np.ndarray: 生成的帧
+        """
+        h, w = reference_frame.shape[:2]
+        
+        if color_mode == 'black':
+            return np.zeros((h, w, 3), dtype=np.uint8)
+        elif color_mode == 'white':
+            return np.ones((h, w, 3), dtype=np.uint8) * 255
+        elif color_mode == 'blur':
+            # 使用参考帧的高度模糊版本
+            return cv2.GaussianBlur(reference_frame, (51, 51), 0)
+        else:
+            return np.zeros((h, w, 3), dtype=np.uint8)
 
 if __name__ == "__main__":
     # 创建命令行参数解析器
