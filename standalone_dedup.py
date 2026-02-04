@@ -4,7 +4,6 @@
 """
 import os
 import sys
-import subprocess
 from pathlib import Path
 from typing import List
 from Upload.utils.log import logger as logging

@@ -162,7 +162,7 @@ class VideoConfig:
         self.hash_disruption_block_size: int = 3            # 随机色块大小（像素），建议 2-5
         
         # 贴纸叠加参数
-        self.enable_sticker: bool = False                   # 是否启用贴纸叠加
+        self.enable_sticker: bool = True                   # 是否启用贴纸叠加
         self.sticker_folder: str = 'assets/stickers/'       # 贴纸文件夹路径
         self.sticker_opacity: float = 0.7                   # 贴纸透明度，范围 0-1
         self.sticker_scale_range: tuple = (0.08, 0.15)      # 贴纸大小范围（占画面比例）
