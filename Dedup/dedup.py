@@ -58,19 +58,19 @@ class VideoConfig:
 
         # 标题参数
         self.include_titles: bool = True                   # 是否添加标题
-        self.titles_opacity: float = 0.10                   # 标题透明度，范围0-1
-        self.top_title: str = 'YANQU'                       # 顶部标题文本
+        self.titles_opacity: float = 0.8                   # 标题透明度，范围0-1，建议 0.5-1.0
+        self.top_title: str = '@暖心守护人'                       # 顶部标题文本
         self.top_title_margin: int = 5                      # 顶部标题与顶部的间隙百分比，范围 0-100。
-        self.bottom_title: str = 'YANQU'                    # 底部标题文本
+        self.bottom_title: str = ''                    # 底部标题文本
         self.bottom_title_margin: int = 5                   # 底部标题与底部的间隙百分比，范围 0-100。
         self.titles_color: str = 'red'                      # 标题颜色，支持颜色名称或 HEX 码。
 
         # 水印参数
         self.include_watermark: bool = True                         # 是否添加水印
-        self.watermark_opacity: float = 0.06                        # 水印透明度，范围0-1，文字0.10，图片视频0.05
-        self.watermark_direction: str = 'random'                    # 水印移动方向
+        self.watermark_opacity: float = 0.1                         # 水印透明度，范围0-1，建议 0.10-0.20
+        self.watermark_direction: str = 'center'                    # 水印移动方向:random(每帧随机位置)、left_to_right(从左到右水平移动)、right_to_left(从右到左水平移动)、top_to_bottom(从上到下垂直移动)、bottom_to_top(从下到上垂直移动)、lt_to_rb(左上到右下对角线)、rt_to_lb(右上到左下对角线)、lb_to_rt(左下到右上对角线)、rb_to_lt(右下到左上对角线)
         self.watermark_color: str = 'white'                         # 水印颜色，支持颜色名称或 HEX 码。
-        self.watermark_text: str = '暖心守护人'                     # 水印文本内容
+        self.watermark_text: str = '@暖心守护人'                    # 水印文本内容
         self.watermark_type: str = 'text'                           # 水印类型，根据类型设置对应路径，text、image、video。
         self.watermark_image_path: str = 'assets/watermark.png'     # 图片水印文件路径，当 watermark_type 为 'image' 时使用。
         self.watermark_video_path: str = ''                         # 视频水印文件路径，当 watermark_type 为 'video' 时使用。
@@ -137,12 +137,10 @@ class VideoConfig:
 
         # 高级效果
         self.scramble_frequency: float = 0.0                # 频域扰乱参数，0.0表示禁用，范围0.0-1.0，开启后处理时间较长。
-        self.enable_texture_noise: bool = False             # 是否启用纹理噪声
+        self.enable_texture_noise: bool = True              # 是否启用纹理噪声
         self.texture_noise_strength: float = 0.5            # 纹理噪声强度，范围 0-1，默认 0.5
         self.enable_blur_edge: bool = True                  # 是否启用边缘模糊
 
-        # ========== 2025年新增去重增强功能 ==========
-        
         # 元数据清洗参数
         self.enable_metadata_clean: bool = True             # 是否清洗视频元数据
         self.randomize_creation_time: bool = True           # 是否随机化创建时间
@@ -568,6 +566,76 @@ class AudioHandler:
         except Exception as e:
             logging.error(f"背景音乐混合失败: {str(e)}")
             raise
+
+class MetadataHandler:
+    """
+    元数据处理类，用于清洗视频元数据以增强去重效果。
+    通过去除原始元数据、随机化创建时间等方式干扰平台的视频识别。
+    """
+    
+    @staticmethod
+    def clean_metadata(video_path: str, config: VideoConfig) -> None:
+        """
+        清洗视频元数据。
+        
+        参数:
+            video_path: 视频文件路径
+            config: 视频处理配置对象
+        """
+        if not config.enable_metadata_clean:
+            return
+        
+        try:
+            import subprocess
+            import datetime
+            
+            # 创建临时文件路径
+            temp_path = video_path + '.tmp.mp4'
+            
+            # 构建 FFmpeg 命令
+            cmd = ['ffmpeg', '-y', '-i', video_path, '-map_metadata', '-1']
+            
+            # 随机化创建时间
+            if config.randomize_creation_time:
+                # 生成随机的创建时间（过去30天内的随机时间）
+                days_ago = random.randint(1, 30)
+                hours_offset = random.randint(0, 23)
+                minutes_offset = random.randint(0, 59)
+                random_time = datetime.datetime.now() - datetime.timedelta(
+                    days=days_ago, hours=hours_offset, minutes=minutes_offset
+                )
+                creation_time = random_time.strftime('%Y-%m-%dT%H:%M:%S')
+                cmd.extend(['-metadata', f'creation_time={creation_time}'])
+                logging.info(f"随机化创建时间: {creation_time}")
+            
+            # 添加随机编码器标识
+            encoders = ['Lavf58.76.100', 'Lavf59.27.100', 'Lavf60.3.100', 'HandBrake', 'FFmpeg']
+            random_encoder = random.choice(encoders)
+            cmd.extend(['-metadata', f'encoder={random_encoder}'])
+            
+            # 复制视频和音频流，不重新编码
+            cmd.extend(['-c', 'copy', temp_path])
+            
+            # 执行命令
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0:
+                # 替换原文件
+                import shutil
+                shutil.move(temp_path, video_path)
+                logging.info(f"元数据清洗完成: {video_path}")
+            else:
+                logging.warning(f"元数据清洗失败: {result.stderr}")
+                # 清理临时文件
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+                    
+        except Exception as e:
+            logging.error(f"元数据清洗异常: {str(e)}")
+            # 确保清理临时文件
+            temp_path = video_path + '.tmp.mp4'
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
 class AudioFingerprintDisruptor:
     """
@@ -1946,6 +2014,10 @@ class VideoHandler:
         process.stdin.close()
         process.wait()
         logging.info(f"视频处理完成，输出到 {output_path}")
+        
+        # ========== 2025新增：元数据清洗 ==========
+        if self.config.enable_metadata_clean:
+            MetadataHandler.clean_metadata(output_path, self.config)
 
     def _generate_intro_outro_frame(self, reference_frame: np.ndarray, color_mode: str) -> np.ndarray:
         """

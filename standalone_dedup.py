@@ -136,6 +136,7 @@ class StandaloneDedupProcessor:
             dedup_config.watermark_video_path = fix_path(dedup_config.watermark_video_path)
             dedup_config.hzh_video_file = fix_path(dedup_config.hzh_video_file)
             dedup_config.subtitles_file = fix_path(dedup_config.subtitles_file)
+            dedup_config.sticker_folder = fix_path(dedup_config.sticker_folder)
 
             # 强制使用配置的去重参数 (如果需要从 dedup.py 默认值覆盖，可以在这里设置)
             # 目前 dedup.py 的默认值已经是我们在之前步骤修改过的 (warmark='text', forced flip)
