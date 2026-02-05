@@ -45,7 +45,7 @@ class VideoConfig:
         # 视频加速与随机镜像
         self.enable_speed_change: bool = True               # 是否启用视频加速
         self.speed_change_range: tuple = (1.05, 1.15)       # 随机加速范围
-        self.enable_random_flip: bool = True               # 是否启用随机水平镜像（覆盖 flip_horizontal） - 设为False以强制使用flip_horizontal
+        self.enable_random_flip: bool = False               # 是否启用随机水平镜像（覆盖 flip_horizontal） - 设为False以强制使用flip_horizontal
 
         # 字幕参数
         self.include_subtitles: bool = False                # 是否添加字幕
@@ -94,7 +94,7 @@ class VideoConfig:
         self.background_music_volume: float = 0.1           # 背景音乐音量，范围0-1。
 
         # 视频镜像与旋转
-        self.flip_horizontal: bool = True                   # 是否启用水平镜像 (enable_random_flip=False时生效)
+        self.flip_horizontal: bool = False                   # 是否启用水平镜像 (enable_random_flip=False时生效)
         self.rotation_angle: int = -3                       # 旋转角度（度），建议值 -3 到 3。
 
         # 视频裁剪

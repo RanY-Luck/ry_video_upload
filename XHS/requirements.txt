@@ -1,0 +1,14 @@
+# 小红书博主笔记提取脚本 - 依赖清单
+
+# 核心依赖
+python-dotenv>=1.0.0    # 环境变量管理
+rich>=13.0.0            # 美化终端输出
+
+# XHS-Downloader 项目依赖 (已包含在 XHS-Downloader-master 中)
+# httpx>=0.25.0
+# aiofiles>=23.0.0
+# lxml>=4.9.0
+# xhshow>=0.1.0
+
+# 可选依赖
+# pandas>=2.0.0         # 如果需要更强大的数据处理功能
