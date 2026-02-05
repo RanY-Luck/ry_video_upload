@@ -59,3 +59,6 @@ Dedup/logs/processed_videos.log
 
 # 图片
 images
+
+# 小红书
+XHS/downloads/
