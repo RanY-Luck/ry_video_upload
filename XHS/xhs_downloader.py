@@ -10,6 +10,7 @@ import asyncio
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
@@ -149,7 +150,107 @@ class XHSDownloader:
         # 验证 Cookie
         if not self.cookie:
             print("[警告] 未配置 XHS_COOKIE，可能无法正常下载内容")
-    
+            
+    async def download_note(self, note, save_text: bool = True):
+        """
+        下载 XHSNote 对象
+        Compatibility method for XHSMonitor
+        """
+        if not hasattr(note, 'note_url') or not note.note_url:
+            print(f"[错误] 笔记对象缺失 URL: {note}")
+            return {'success': False, 'images': [], 'video': None}
+            
+        print(f"[开始] 下载笔记: {note.note_url}")
+        
+        # Try standard download first
+        content = await self.download(note.note_url, save_text=save_text)
+        
+        # Fallback if standard download failed but we have data in note object
+        if not content and hasattr(note, 'images') and note.images:
+            print("[警告] 标准下载失败，尝试使用现有数据下载 (可能缺失视频/详细文案)...")
+            content = await self.download_manual(note, save_text)
+
+        if content:
+            return {
+                'success': True,
+                'images': content.download_urls, 
+                'video': None # Video not supported in manual mode reliably yet
+            }
+        else:
+             return {'success': False, 'images': [], 'video': None}
+
+    async def download_manual(self, note, save_text: bool = True) -> Optional[XHSContent]:
+        """使用笔记对象中的现有数据进行下载 (Fallback)"""
+        try:
+            # Construct minimal XHSContent
+            # Clean title
+            import re
+            safe_title = self._clean_filename(note.title)
+            
+            content = XHSContent(
+                note_id=note.note_id,
+                title=note.title,
+                description="(标准抓取失败，仅含标题/图片)",
+                tags="",
+                content_type=note.note_type,
+                publish_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"), # Unknown time
+                author_name="Unknown", # Should ideally pass this in note object
+                author_id="Unknown",
+                likes=0,
+                collects=0,
+                comments=0,
+                shares=0,
+                note_url=note.note_url,
+                download_urls=note.images,
+                download_path=None
+            )
+            
+            # Setup path
+            author_folder = f"Manual_{safe_title[:10]}"
+            save_dir = self.download_dir / author_folder
+            save_dir.mkdir(parents=True, exist_ok=True)
+            content.download_path = save_dir
+            
+            # Download images using httpx directly
+            import httpx
+            async with httpx.AsyncClient(headers={'User-Agent': self.user_agent}) as client:
+                downloaded_files = []
+                for i, url in enumerate(content.download_urls):
+                    if not url: continue
+                    ext = "jpg" # Default
+                    if "webp" in url: ext = "webp"
+                    
+                    filename = f"{safe_title[:30]}_{i}.{ext}"
+                    filepath = save_dir / filename
+                    
+                    if filepath.exists() and self.skip_existing:
+                        downloaded_files.append(str(filepath))
+                        continue
+                        
+                    print(f"Downloading image: {url[:50]}...")
+                    try:
+                        resp = await client.get(url, timeout=30)
+                        if resp.status_code == 200:
+                            filepath.write_bytes(resp.content)
+                            downloaded_files.append(str(filepath))
+                    except Exception as e:
+                        print(f"Image download failed: {e}")
+            
+            # Save text
+            if save_text:
+                text_file = save_dir / f"{safe_title}.txt"
+                text_content = f"Title: {content.title}\nID: {content.note_id}\nURL: {content.note_url}\n\n(Downloaded via Manual Fallback)"
+                text_file.write_text(text_content, encoding='utf-8')
+                
+            print(f"[成功] 手动下载完成: {content.title[:30]}...")
+            return content
+            
+        except Exception as e:
+            print(f"Manual download failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     async def download(
         self,
         url: str,
