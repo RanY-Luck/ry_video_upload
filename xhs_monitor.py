@@ -195,335 +195,415 @@ class XHSBloggerMonitor:
         except Exception as e:
             logger.error(f"[记录] 保存记录文件失败: {e}")
 
-    async def fetch_latest_notes(self) -> List[Dict]:
-        """
-        使用 Playwright 访问博主主页，通过 DOM 解析 + __INITIAL_STATE__ 提取笔记列表。
-        （不再依赖 API 拦截，因为小红书安全盾会阻止 user_posted API 的发起）
+    async def _create_browser_context(self):
+        """创建并配置 Playwright 浏览器上下文"""
+        from playwright.async_api import async_playwright
 
-        Returns:
-            笔记信息列表，每项包含 note_id, title, xsec_token, note_url
-        """
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError:
-            logger.error("[Playwright] 未安装 Playwright，请运行: pip install playwright && playwright install chromium")
-            return []
+        pw = await async_playwright().start()
+        browser = await pw.chromium.launch(
+            headless=False,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-infobars",
+                "--window-size=1280,900",
+            ],
+        )
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 900},
+            locale="zh-CN",
+        )
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = {runtime: {}};
+        """)
 
-        captured: Dict[str, Dict] = {}
-        page_user_name = ""
+        # 注入 Cookie
+        if self.cookie:
+            cookies = []
+            for item in self.cookie.split(";"):
+                item = item.strip()
+                if "=" in item:
+                    name, value = item.split("=", 1)
+                    cookies.append({
+                        "name": name.strip(),
+                        "value": value.strip(),
+                        "domain": ".xiaohongshu.com",
+                        "path": "/",
+                    })
+            if cookies:
+                await context.add_cookies(cookies)
+                logger.info(f"[浏览器] 已注入 {len(cookies)} 个 Cookie")
 
-        user_profile_url = f"https://www.xiaohongshu.com/user/profile/{self.user_id}"
+        return pw, browser, context
 
-        async with async_playwright() as p:
-            logger.info(f"[浏览器] 启动 Chromium 检查博主 {self.user_id}...")
+    async def _get_note_ids_from_dom(self, page) -> List[Dict]:
+        """从页面 DOM 中提取笔记 ID 列表"""
+        card_infos = await page.evaluate("""
+            () => {
+                const results = [];
+                const seen = new Set();
+                const selectors = [
+                    'section.note-item a[href*="/explore/"]',
+                    'section.note-item a[href*="/discovery/item/"]',
+                    'div.note-item a[href*="/explore/"]',
+                    'a[href*="/explore/"]',
+                    'a[href*="/discovery/item/"]',
+                ];
+                for (const sel of selectors) {
+                    const links = document.querySelectorAll(sel);
+                    for (const a of links) {
+                        const href = a.href || '';
+                        const m = href.match(/\\/(explore|discovery\\/item)\\/([a-f0-9]+)/i);
+                        if (!m) continue;
+                        const noteId = m[2];
+                        if (seen.has(noteId)) continue;
+                        seen.add(noteId);
+                        const titleEl = a.querySelector('.title, .note-title, span, footer span');
+                        const title = (titleEl ? titleEl.textContent : '') || '';
+                        results.push({
+                            note_id: noteId,
+                            title: title.trim().substring(0, 100),
+                        });
+                    }
+                    if (results.length > 0) break;
+                }
+                return results;
+            }
+        """)
+        return card_infos or []
 
-            browser = await p.chromium.launch(
-                headless=False,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-infobars",
-                    "--window-size=1280,900",
-                ],
-            )
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1280, "height": 900},
-                locale="zh-CN",
-            )
+    async def _extract_note_content(self, page) -> Dict:
+        """从当前打开的笔记详情页提取内容（图片/视频/文案）"""
+        return await page.evaluate("""
+            () => {
+                const result = {
+                    title: '',
+                    description: '',
+                    images: [],
+                    video: '',
+                    author: '',
+                };
 
-            # 注入反检测脚本（隐藏 webdriver 标记）
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-                window.chrome = {runtime: {}};
-            """)
+                // 提取标题
+                const titleEl = document.querySelector('#detail-title')
+                              || document.querySelector('.title')
+                              || document.querySelector('[class*="title"]');
+                if (titleEl) result.title = titleEl.textContent.trim();
 
-            # 注入 Cookie
-            if self.cookie:
-                cookies = []
-                for item in self.cookie.split(";"):
-                    item = item.strip()
-                    if "=" in item:
-                        name, value = item.split("=", 1)
-                        cookies.append({
-                            "name": name.strip(),
-                            "value": value.strip(),
-                            "domain": ".xiaohongshu.com",
-                            "path": "/",
-                        })
-                if cookies:
-                    await context.add_cookies(cookies)
-                    logger.info(f"[浏览器] 已注入 {len(cookies)} 个 Cookie")
-            else:
-                logger.warning("[浏览器] 未配置 Cookie，可能无法获取笔记数据")
+                // 提取文案描述
+                const descEl = document.querySelector('#detail-desc')
+                             || document.querySelector('.desc, .content, .note-text')
+                             || document.querySelector('[class*="desc"]');
+                if (descEl) result.description = descEl.textContent.trim();
 
-            page = await context.new_page()
-
-            try:
-                await page.goto(user_profile_url, wait_until="domcontentloaded", timeout=40000)
-                # 等待页面渲染完成
-                await page.wait_for_timeout(5000)
-
-                # 向下滚动以加载更多笔记卡片
-                for _ in range(3):
-                    await page.evaluate("window.scrollBy(0, 800)")
-                    await asyncio.sleep(1.5)
-
-                # ===== 策略1：从 __INITIAL_STATE__ 提取 SSR 预渲染数据 =====
-                try:
-                    initial_state = await page.evaluate("""
-                        () => {
-                            try {
-                                const state = window.__INITIAL_STATE__;
-                                if (!state) return null;
-                                // Playwright 需要返回可序列化对象，这里直接提取核心字段
-                                const result = {user: {}, notes: []};
-
-                                // 提取用户信息
-                                if (state.user && state.user.userPageData) {
-                                    const u = state.user.userPageData;
-                                    result.user = {nickname: u.basicInfo?.nickname || ''};
-                                    // 提取用户发布的笔记
-                                    const notes = u.notes || [];
-                                    for (const n of notes) {
-                                        if (n.id || n.noteId) {
-                                            result.notes.push({
-                                                note_id: n.id || n.noteId || '',
-                                                title: n.displayTitle || n.title || '',
-                                                xsec_token: n.xsecToken || '',
-                                            });
-                                        }
-                                    }
-                                }
-
-                                // 尝试从 feed 路径读取
-                                if (result.notes.length === 0 && state.feed) {
-                                    const feeds = Object.values(state.feed);
-                                    for (const feed of feeds) {
-                                        if (feed && Array.isArray(feed.items)) {
-                                            for (const item of feed.items) {
-                                                const nc = item.noteCard || item;
-                                                const nid = nc.id || nc.noteId || item.id || '';
-                                                if (nid) {
-                                                    result.notes.push({
-                                                        note_id: nid,
-                                                        title: nc.displayTitle || nc.title || '',
-                                                        xsec_token: nc.xsecToken || '',
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                return result;
-                            } catch(e) {
-                                return {error: e.toString()};
-                            }
+                // 提取图片 URL（包含多种来源）
+                const imgSelectors = [
+                    '.swiper-slide img[src]',
+                    '.carousel img[src]',
+                    '.note-image img[src]',
+                    '.media-container img[src]',
+                    'img[class*="note"][src]',
+                    '.slide-item img[src]',
+                ];
+                const imgSeen = new Set();
+                for (const sel of imgSelectors) {
+                    document.querySelectorAll(sel).forEach(img => {
+                        let src = img.src || img.getAttribute('data-src') || '';
+                        // 过滤掉头像等小图
+                        if (src && !imgSeen.has(src) && !src.includes('avatar') 
+                            && (src.includes('spectrum') || src.includes('ci.xiaohongshu') 
+                                || src.includes('xhscdn') || src.includes('sns-img'))) {
+                            imgSeen.add(src);
+                            result.images.push(src);
                         }
-                    """)
+                    });
+                }
 
-                    if initial_state and not initial_state.get("error"):
-                        nickname = initial_state.get("user", {}).get("nickname", "")
-                        if nickname and not page_user_name:
-                            page_user_name = nickname
+                // 提取视频 URL
+                const videoEl = document.querySelector('video source[src]')
+                              || document.querySelector('video[src]');
+                if (videoEl) {
+                    result.video = videoEl.src || videoEl.getAttribute('src') || '';
+                }
+                // 也尝试从 xgplayer 播放器提取
+                if (!result.video) {
+                    const xgVideo = document.querySelector('.xgplayer video');
+                    if (xgVideo && xgVideo.src) result.video = xgVideo.src;
+                }
 
-                        ssr_notes = initial_state.get("notes", [])
-                        if ssr_notes:
-                            logger.info(f"[SSR] 从 __INITIAL_STATE__ 提取到 {len(ssr_notes)} 条笔记")
-                        for n in ssr_notes:
-                            nid = n.get("note_id", "")
-                            if nid and nid not in captured:
-                                captured[nid] = n
-                    elif initial_state and initial_state.get("error"):
-                        logger.warning(f"[SSR] __INITIAL_STATE__ 解析异常: {initial_state['error']}")
-                    else:
-                        logger.info("[SSR] __INITIAL_STATE__ 为空或不存在")
-                except Exception as e:
-                    logger.warning(f"[SSR] 提取 __INITIAL_STATE__ 失败: {e}")
+                // 提取作者名
+                const authorEl = document.querySelector('.author-name, .username, [class*="author"] .name');
+                if (authorEl) result.author = authorEl.textContent.trim();
 
-                # ===== 策略2：从 DOM 页面元素提取笔记链接 =====
+                return result;
+            }
+        """)
+
+    async def _download_media(self, urls: List[str], save_dir: Path, title: str) -> int:
+        """下载图片/视频文件"""
+        downloaded = 0
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.xiaohongshu.com/"},
+            timeout=30, follow_redirects=True,
+        ) as client:
+            for i, url in enumerate(urls):
+                if not url:
+                    continue
+                # 确定文件扩展名
+                ext = "jpg"
+                if "video" in url or ".mp4" in url:
+                    ext = "mp4"
+                elif ".webp" in url:
+                    ext = "webp"
+                elif ".png" in url:
+                    ext = "png"
+
+                safe_title = re.sub(r'[\\/:*?"<>|]', '_', title)[:50]
+                filename = f"{safe_title}_{i}.{ext}"
+                filepath = save_dir / filename
+
+                if filepath.exists():
+                    downloaded += 1
+                    continue
+
                 try:
-                    dom_notes = await page.evaluate("""
-                        () => {
-                            const results = [];
-                            // 查找所有笔记卡片链接（多种选择器兼容）
-                            const selectors = [
-                                'a[href*="/explore/"]',
-                                'a[href*="/discovery/item/"]',
-                                'a[href*="xsec_token"]',
-                                'section.note-item a',
-                                'div.note-item a',
-                                '.feeds-container a[href*="/explore/"]',
-                            ];
-                            const seen = new Set();
-                            for (const sel of selectors) {
-                                const links = document.querySelectorAll(sel);
-                                for (const a of links) {
-                                    const href = a.href || a.getAttribute('href') || '';
-                                    // 从 href 提取 note_id
-                                    const m = href.match(/\\/explore\\/([a-f0-9]+)/i)
-                                             || href.match(/\\/discovery\\/item\\/([a-f0-9]+)/i);
-                                    if (!m) continue;
-                                    const noteId = m[1];
-                                    if (seen.has(noteId)) continue;
-                                    seen.add(noteId);
-
-                                    // 提取 xsec_token
-                                    const tokenMatch = href.match(/xsec_token=([^&]+)/);
-                                    const token = tokenMatch ? decodeURIComponent(tokenMatch[1]) : '';
-
-                                    // 提取标题（从卡片文字元素）
-                                    const titleEl = a.querySelector('.title, .note-title, span, footer span');
-                                    const title = (titleEl ? titleEl.textContent : '') || a.textContent || '';
-
-                                    results.push({
-                                        note_id: noteId,
-                                        title: title.trim().substring(0, 100),
-                                        xsec_token: token,
-                                    });
-                                }
-                            }
-                            return results;
-                        }
-                    """)
-
-                    if dom_notes:
-                        logger.info(f"[DOM] 从页面 DOM 提取到 {len(dom_notes)} 条笔记链接")
-                        for n in dom_notes:
-                            nid = n.get("note_id", "")
-                            token = n.get("xsec_token", "")
-                            # 补充或更新（优先保留有 token 的）
-                            if nid and (nid not in captured or (token and not captured[nid].get("xsec_token"))):
-                                captured[nid] = n
+                    resp = await client.get(url)
+                    if resp.status_code == 200 and len(resp.content) > 1000:
+                        filepath.write_bytes(resp.content)
+                        downloaded += 1
+                        logger.info(f"[下载] ✓ 媒体文件: {filename} ({len(resp.content) // 1024}KB)")
                     else:
-                        logger.warning("[DOM] 未从 DOM 中找到任何笔记链接")
-
+                        logger.warning(f"[下载] ✗ 媒体文件异常: HTTP {resp.status_code}, 大小 {len(resp.content)}")
                 except Exception as e:
-                    logger.warning(f"[DOM] DOM 提取异常: {e}")
-
-                # ===== 策略3：打印页面截图路径供人工排查 =====
-                if not captured:
-                    debug_path = str(self.download_dir / f"debug_{self.user_id}.png")
-                    try:
-                        await page.screenshot(path=debug_path, full_page=True)
-                        logger.warning(f"[调试] 未获取到笔记，已保存页面截图: {debug_path}")
-                    except Exception:
-                        pass
-
-                    # 打印页面 URL 和标题，确认是否跳转
-                    current_url = page.url
-                    page_title = await page.title()
-                    logger.info(f"[调试] 当前页面 URL: {current_url}")
-                    logger.info(f"[调试] 当前页面标题: {page_title}")
-
-            except Exception as e:
-                logger.warning(f"[浏览器] 页面加载异常: {e}")
-            finally:
-                await browser.close()
-
-        if page_user_name and not self.author_name:
-            self.author_name = page_user_name
-
-        # 构建最终笔记列表（带完整 URL）
-        notes = []
-        for note_data in captured.values():
-            note_id = note_data["note_id"]
-            token = note_data.get("xsec_token", "")
-            if token:
-                note_url = (
-                    f"https://www.xiaohongshu.com/explore/{note_id}"
-                    f"?xsec_token={token}&xsec_source=pc_user"
-                )
-            else:
-                note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
-            notes.append({
-                "note_id": note_id,
-                "title": note_data.get("title", ""),
-                "xsec_token": token,
-                "note_url": note_url,
-            })
-
-        logger.info(f"[API] 共捕获 {len(notes)} 个笔记（博主: {self.user_id}）")
-        return notes
+                    logger.warning(f"[下载] ✗ 媒体文件失败: {filename} — {e}")
+        return downloaded
 
     async def check_and_download(self) -> int:
         """
-        执行一次检查：抓取最新笔记 → 对比 → 下载新帖。
+        一体化检查 + 下载：在同一个 Playwright 浏览器会话中完成。
+        1. 访问博主主页获取笔记列表
+        2. 对比已知笔记，找出新帖
+        3. 依次点击新帖卡片（触发 Vue 路由），从笔记详情页提取内容
+        4. 下载图片/视频/文案
+        5. 关闭弹窗后处理下一篇
 
         Returns:
             本次发现并处理的新笔记数量
         """
         logger.info(f"[检查] 开始检查博主: {self.user_id}")
-        latest_notes = await self.fetch_latest_notes()
 
-        if not latest_notes:
-            logger.warning(f"[检查] 未获取到任何笔记，可能是登录失效或博主无内容")
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.error("[Playwright] 未安装，请运行: pip install playwright && playwright install chromium")
             return 0
 
-        # 找出新笔记（当前记录不含的）
-        new_notes = [n for n in latest_notes if n["note_id"] not in self._seen_ids]
-
-        if not new_notes:
-            logger.info(f"[检查] 无新笔记（已知 {len(self._seen_ids)} 篇）")
-            return 0
-
-        logger.info(f"[发现] 博主 {self.author_name or self.user_id} 有 {len(new_notes)} 篇新笔记！")
-
-        # 首次运行时只记录 ID，不下载（防止把所有历史帖都下载一遍）
-        if len(self._seen_ids) == 0:
-            logger.info("[首次] 首次运行，记录当前所有笔记 ID 作为基线，不执行下载")
-            for note in latest_notes:
-                self._seen_ids.add(note["note_id"])
-            self._save_seen_ids()
-            logger.info(f"[首次] 已记录 {len(self._seen_ids)} 篇笔记为基线，后续检测到新帖才会下载")
-            return 0
-
-        # 下载新笔记
+        user_profile_url = f"https://www.xiaohongshu.com/user/profile/{self.user_id}"
+        pw, browser, context = await self._create_browser_context()
         download_success = 0
-        for idx, note in enumerate(new_notes, 1):
-            note_id = note["note_id"]
-            note_url = note["note_url"]
-            title = note["title"]
-            label = self.author_name or self.user_id
+        new_note_count = 0
 
-            logger.info(f"[下载 {idx}/{len(new_notes)}] {title} — {note_url}")
+        try:
+            page = await context.new_page()
+            logger.info(f"[浏览器] 启动 Chromium 检查博主 {self.user_id}...")
 
+            await page.goto(user_profile_url, wait_until="domcontentloaded", timeout=40000)
+            await page.wait_for_timeout(5000)
+
+            # 滚动加载
+            for _ in range(3):
+                await page.evaluate("window.scrollBy(0, 800)")
+                await asyncio.sleep(1.5)
+
+            # 从 DOM 获取笔记列表
+            card_infos = await self._get_note_ids_from_dom(page)
+            logger.info(f"[DOM] 共发现 {len(card_infos)} 条笔记")
+
+            if not card_infos:
+                logger.warning("[检查] 未获取到任何笔记，可能是登录失效或博主无内容")
+                # 截图调试
+                debug_path = str(self.download_dir / f"debug_{self.user_id}.png")
+                try:
+                    await page.screenshot(path=debug_path, full_page=True)
+                    logger.warning(f"[调试] 已保存页面截图: {debug_path}")
+                except Exception:
+                    pass
+                return 0
+
+            # 提取博主昵称
             try:
-                content = await self.downloader.download(note_url, save_text=True)
-                if content:
-                    logger.info(f"[下载] ✓ 成功: {title}")
-                    download_success += 1
+                name = await page.evaluate("""
+                    () => {
+                        const el = document.querySelector('.user-name, .username, [class*="nickname"]');
+                        return el ? el.textContent.trim() : '';
+                    }
+                """)
+                if name and not self.author_name:
+                    self.author_name = name
+            except Exception:
+                pass
 
-                    # Bark 推送通知
+            # 过滤出新笔记
+            all_note_ids = [c["note_id"] for c in card_infos]
+            new_notes = [c for c in card_infos if c["note_id"] not in self._seen_ids]
+
+            if not new_notes:
+                logger.info(f"[检查] 无新笔记（已知 {len(self._seen_ids)} 篇）")
+                return 0
+
+            logger.info(f"[发现] 博主 {self.author_name or self.user_id} 有 {len(new_notes)} 篇新笔记！")
+
+            # 首次运行：只记录基线
+            if len(self._seen_ids) == 0:
+                logger.info("[首次] 首次运行，记录当前所有笔记 ID 作为基线，不执行下载")
+                for nid in all_note_ids:
+                    self._seen_ids.add(nid)
+                self._save_seen_ids()
+                logger.info(f"[首次] 已记录 {len(self._seen_ids)} 篇笔记为基线")
+                return 0
+
+            new_note_count = len(new_notes)
+
+            # ===== 逐个点击新笔记卡片，从详情页提取内容并下载 =====
+            for idx, note_info in enumerate(new_notes, 1):
+                note_id = note_info["note_id"]
+                title = note_info.get("title", "")
+                label = self.author_name or self.user_id
+
+                logger.info(f"[处理 {idx}/{len(new_notes)}] 笔记 {note_id}: {title[:30]}")
+
+                try:
+                    # 确保在主页
+                    if self.user_id not in page.url:
+                        await page.goto(user_profile_url, wait_until="domcontentloaded", timeout=20000)
+                        await page.wait_for_timeout(3000)
+
+                    # 查找笔记卡片的容器元素（section.note-item 或外层 div）
+                    # 注意：点击的是容器而不是 <a> 标签，这样才能触发 Vue 路由事件
+                    card_el = await page.query_selector(
+                        f'section.note-item:has(a[href*="{note_id}"])'
+                    ) or await page.query_selector(
+                        f'div.note-item:has(a[href*="{note_id}"])'
+                    ) or await page.query_selector(
+                        f'a[href*="{note_id}"]'
+                    )
+
+                    if not card_el:
+                        logger.warning(f"[处理] 未找到笔记 {note_id} 的卡片元素")
+                        self._seen_ids.add(note_id)
+                        continue
+
+                    # 滚动到可见位置并点击
+                    await card_el.scroll_into_view_if_needed(timeout=5000)
+                    await asyncio.sleep(0.5)
+                    await card_el.click(timeout=10000)
+
+                    # 等待笔记详情加载（URL 应该变为 /explore/{note_id}?xsec_token=...）
+                    await asyncio.sleep(3)
+                    current_url = page.url
+                    logger.info(f"[处理] 导航后 URL: {current_url}")
+
+                    # 提取笔记内容
+                    content = await self._extract_note_content(page)
+
+                    note_title = content.get("title", "") or title or note_id
+                    note_desc = content.get("description", "")
+                    note_images = content.get("images", [])
+                    note_video = content.get("video", "")
+                    note_author = content.get("author", "") or label
+
+                    logger.info(
+                        f"[提取] 标题: {note_title[:30]} | "
+                        f"图片: {len(note_images)} | "
+                        f"视频: {'✓' if note_video else '✗'} | "
+                        f"文案: {len(note_desc)} 字"
+                    )
+
+                    # 准备下载目录
+                    safe_author = re.sub(r'[\\/:*?"<>|]', '_', note_author)[:30]
+                    safe_title = re.sub(r'[\\/:*?"<>|]', '_', note_title)[:50]
+                    save_dir = self.download_dir / safe_author / f"{note_id}_{safe_title}"
+                    save_dir.mkdir(parents=True, exist_ok=True)
+
+                    # 保存文案
+                    text_file = save_dir / f"{safe_title}.txt"
+                    text_content = (
+                        f"标题: {note_title}\n"
+                        f"作者: {note_author}\n"
+                        f"ID: {note_id}\n"
+                        f"URL: {current_url}\n"
+                        f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                        f"\n{note_desc}"
+                    )
+                    text_file.write_text(text_content, encoding="utf-8")
+
+                    # 下载媒体文件
+                    media_urls = []
+                    if note_video:
+                        media_urls.append(note_video)
+                    media_urls.extend(note_images)
+
+                    if media_urls:
+                        dl_count = await self._download_media(media_urls, save_dir, safe_title)
+                        logger.info(f"[下载] 媒体下载完成: {dl_count}/{len(media_urls)}")
+                    else:
+                        logger.warning("[下载] 未提取到任何媒体文件 URL")
+
+                    download_success += 1
+                    logger.info(f"[下载] ✓ 成功: {note_title[:30]}")
+
+                    # 推送通知
                     await self.notifier.push(
                         title=f"📕 {label} 发布新帖",
-                        body=f"《{title}》\n{note_url}",
-                        url=note_url,
+                        body=f"《{note_title}》\n{current_url}",
+                        url=current_url,
                         group="小红书监控",
                     )
-                else:
-                    logger.warning(f"[下载] ✗ 失败: {title}")
-            except Exception as e:
-                logger.error(f"[下载] 异常: {title} — {e}")
 
-            # 无论成功与否都记录（避免重复尝试）
-            self._seen_ids.add(note_id)
+                except Exception as e:
+                    logger.error(f"[处理] 笔记 {note_id} 处理异常: {e}")
+                    import traceback
+                    traceback.print_exc()
 
-            # 下载间隔，避免请求过快
-            if idx < len(new_notes):
-                await asyncio.sleep(3)
+                # 无论成功与否都记录
+                self._seen_ids.add(note_id)
+
+                # 回到主页准备下一个
+                try:
+                    await page.goto(user_profile_url, wait_until="domcontentloaded", timeout=20000)
+                    await page.wait_for_timeout(2000)
+                except Exception:
+                    pass
+
+                if idx < len(new_notes):
+                    await asyncio.sleep(2)
+
+        except Exception as e:
+            logger.error(f"[浏览器] 整体异常: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+            try:
+                await pw.stop()
+            except Exception:
+                pass
 
         self._save_seen_ids()
         logger.info(
-            f"[完成] 本轮新帖处理完毕: 共 {len(new_notes)} 篇，成功下载 {download_success} 篇"
+            f"[完成] 本轮新帖处理完毕: 共 {new_note_count} 篇，成功下载 {download_success} 篇"
         )
-        return len(new_notes)
+        return new_note_count
 
 
 # ==========================================
