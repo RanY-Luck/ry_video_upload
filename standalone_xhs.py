@@ -136,6 +136,8 @@ class XHSUserMonitor:
     async def fetch_user_notes_from_page(self) -> List[UserNote]:
         """
         方案1: 从用户主页获取笔记列表 (使用 Playwright)
+        策略: 边滚动边处理 —— 每次滚动后立即对当前可见的新笔记卡片执行 JS click，
+               捕获新标签页 URL（含 xsec_token），避免虚拟滚动导致元素不可见。
         """
         try:
             from playwright.async_api import async_playwright
@@ -147,7 +149,7 @@ class XHSUserMonitor:
 
         async with async_playwright() as p:
             print(f"[启动] 正在启动浏览器获取用户笔记列表...")
-            browser = await p.chromium.launch(headless=False)  # 显示浏览器便于调试
+            browser = await p.chromium.launch(headless=False)
             context = await browser.new_context(
                 user_agent=self.downloader.user_agent or None
             )
@@ -172,144 +174,142 @@ class XHSUserMonitor:
             user_page_url = f"https://www.xiaohongshu.com/user/profile/{self.user_id}"
             print(f"[访问] {user_page_url}")
             await page.goto(user_page_url, wait_until='domcontentloaded')
+            await asyncio.sleep(3)
 
-            # 等待页面加载
-            await page.wait_for_timeout(3000)
+            # ===== 边滚动边点击：每次滚动后立即处理当前可见的新笔记卡片 =====
+            print("[开始] 边滚动边获取笔记 xsec_token...")
+            processed_ids = set()
+            no_change_rounds = 0
+            scroll_round = 0
 
-            # 监听网络响应，捕获API数据
-            print("[提取] 正在监听网络请求，尝试从API响应中获取数据...")
+            while True:
+                scroll_round += 1
 
-            captured_notes = {}
-
-            async def handle_response(response):
-                try:
-                    # 拦截包含笔记数据的API
-                    # 通常是 /api/sns/web/v1/user_posted 或 /api/sns/web/v1/feed
-                    if ("xiaohongshu.com/api/sns/web" in response.url) and response.status == 200:
-                        try:
-                            json_data = await response.json()
-                            items = []
-                            # 解析可能的不同结构
-                            if isinstance(json_data, dict):
-                                if 'data' in json_data and isinstance(json_data['data'], dict):
-                                    data_obj = json_data['data']
-                                    if 'notes' in data_obj:
-                                        items = data_obj['notes']
-                                    elif 'items' in data_obj:
-                                        items = data_obj['items']
-
-                            for item in items:
-                                # 处理不同的数据结构
-                                note_item = item.get('note_card', item)
-
-                                if 'id' in note_item or 'note_id' in note_item:
-                                    note_id = note_item.get('id') or note_item.get('note_id')
-                                    title = note_item.get('display_title') or note_item.get('title') or "未命名"
-
-                                    # 尝试获取xsec_token
-                                    token = note_item.get('xsec_token')
-
-                                    if note_id:
-                                        # 如果已有记录且没token，则更新；或者新记录
-                                        if note_id not in captured_notes or (token and not captured_notes[note_id].get('xsec_token')):
-                                            captured_notes[note_id] = {
-                                                'note_id': note_id,
-                                                'title': title,
-                                                'xsec_token': token
-                                            }
-                        except:
-                            pass
-                except:
-                    pass
-
-            page.on('response', handle_response)
-
-            # 刷新页面以触发请求
-            print("[操作] 刷新页面以触发API请求...")
-            await page.reload(wait_until='domcontentloaded')
-
-            # 滚动页面加载更多
-            print("[操作] 滚动加载更多...")
-            for _ in range(3):
-                await page.evaluate('window.scrollBy(0, 1000)')
-                await asyncio.sleep(1)
-
-            # 等待数据捕获
-            await asyncio.sleep(2)
-
-            # 整理数据
-            notes_data = list(captured_notes.values())
-            print(f"[提取完成] 共捕获 {len(notes_data)} 个笔记")
-
-            # 限制数量
-            notes_data = notes_data[:self.max_notes] if self.max_notes > 0 else notes_data
-
-            # 统计Token
-            notes_with_token = len([n for n in notes_data if n.get('xsec_token')])
-
-            if notes_with_token > 0:
-                print(f"✓ 成功从API获取 {notes_with_token} 个Token")
-            else:
-                print(f"⚠️  未能从API获取Token，尝试DOM补充...")
-
-                # 如果API没拿到Token，尝试Dom scan (不点击，只看属性)
-                dom_notes = await page.evaluate('''() => {
+                # 获取当前 DOM 中所有可见笔记链接
+                card_infos = await page.evaluate('''() => {
                     const links = document.querySelectorAll('a[href*="/explore/"]');
-                    const res = [];
+                    const result = [];
                     links.forEach(link => {
-                        const href = link.href || link.getAttribute('href');
-                        if (href && href.includes('/explore/')) {
-                            const idMatch = href.match(/\/explore\/([a-zA-Z0-9]+)/);
-                            if (idMatch) {
-                                let token = null;
-                                if (href.includes('xsec_token=')) {
-                                    token = href.split('xsec_token=')[1].split('&')[0];
-                                }
-                                res.push({
-                                    note_id: idMatch[1],
-                                    xsec_token: token
-                                });
-                            }
+                        const href = link.href || '';
+                        const match = href.match(/\/explore\/([a-zA-Z0-9]+)/);
+                        if (match) {
+                            result.push({
+                                note_id: match[1],
+                                href: href,
+                                title: (link.innerText || '').trim().slice(0, 50)
+                            });
                         }
                     });
-                    return res;
+                    return result;
                 }''')
 
-                # 合并数据
-                for dn in dom_notes:
-                    nid = dn['note_id']
-                    if nid in captured_notes:
-                        if dn['xsec_token']:
-                             captured_notes[nid]['xsec_token'] = dn['xsec_token']
-                    else:
-                        captured_notes[nid] = {
-                           'note_id': nid,
-                           'title': f"笔记_{nid}",
-                           'xsec_token': dn['xsec_token']
-                        }
-
-                notes_data = list(captured_notes.values())[:self.max_notes] if self.max_notes > 0 else list(captured_notes.values())
-
-
-            # 构建最终结果
-            for idx, note_data in enumerate(notes_data):
-                note_id = note_data['note_id']
-                title = note_data['title']
-                token = note_data.get('xsec_token')
-
-                if token:
-                    note_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={token}&xsec_source=pc_user"
-                    print(f"[{idx+1}] {note_id[:20]}... ✓ 获取到Token")
+                # 过滤出本轮新出现的卡片
+                new_cards = [c for c in card_infos if c['note_id'] not in processed_ids]
+                if not new_cards:
+                    no_change_rounds += 1
                 else:
-                    note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
-                    print(f"[{idx+1}] {note_id[:20]}... ⚠️ 无Token")
+                    no_change_rounds = 0
 
-                notes.append(UserNote(
-                    note_id=note_id,
-                    note_url=note_url,
-                    title=title,
-                    note_type="unknown"
-                ))
+                # 处理新卡片：通过 JS 找到可见父元素坐标，用 page.mouse 中键点击
+                for card in new_cards:
+                    note_id = card['note_id']
+                    if note_id in processed_ids:
+                        continue
+                    processed_ids.add(note_id)
+
+                    print(f"  [{len(processed_ids)}] 处理笔记 {note_id}...")
+                    title = card.get('title') or f"笔记_{note_id}"
+
+                    try:
+                        # JS 向上遍历 DOM，找到有宽高的可见父容器，返回其视口中心坐标
+                        coords = await page.evaluate(f'''() => {{
+                            const link = document.querySelector('a[href*="/explore/{note_id}"]');
+                            if (!link) return null;
+                            // 先检查 link 自身
+                            let rect = link.getBoundingClientRect();
+                            if (rect.width > 1 && rect.height > 1) {{
+                                return {{x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}};
+                            }}
+                            // 向上找最近的有宽高祖先
+                            let el = link.parentElement;
+                            for (let i = 0; i < 10; i++) {{
+                                if (!el || el === document.body) break;
+                                rect = el.getBoundingClientRect();
+                                if (rect.width > 10 && rect.height > 10) {{
+                                    return {{x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}};
+                                }}
+                                el = el.parentElement;
+                            }}
+                            return null;
+                        }}''')
+
+                        if coords is None:
+                            raise Exception("找不到可见父元素，卡片可能未在视口内")
+
+                        # 用真实鼠标中键点击（打开新标签），完全绕过 Playwright 可见性检查
+                        async with context.expect_page() as new_page_info:
+                            await page.mouse.click(
+                                coords['x'], coords['y'],
+                                button='middle'
+                            )
+
+                        new_page = await new_page_info.value
+                        await new_page.wait_for_load_state('domcontentloaded', timeout=10000)
+                        final_url = new_page.url
+                        await new_page.close()
+
+                        # 从最终 URL 提取 xsec_token
+                        token = None
+                        if 'xsec_token=' in final_url:
+                            token = final_url.split('xsec_token=')[1].split('&')[0]
+
+                        if token:
+                            note_url = f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={token}&xsec_source=pc_user"
+                            print(f"    ✓ Token: {token[:20]}...")
+                        else:
+                            note_url = final_url or f"https://www.xiaohongshu.com/explore/{note_id}"
+                            print(f"    ⚠️ 未获取到 Token (URL: {final_url[:80]})")
+
+                        notes.append(UserNote(
+                            note_id=note_id,
+                            note_url=note_url,
+                            title=title,
+                            note_type="unknown"
+                        ))
+
+                    except Exception as e:
+                        print(f"    ✗ 点击失败: {e}")
+                        notes.append(UserNote(
+                            note_id=note_id,
+                            note_url=f"https://www.xiaohongshu.com/explore/{note_id}",
+                            title=title,
+                            note_type="unknown"
+                        ))
+
+                    # 点击间隔，防风控
+                    await asyncio.sleep(max(0.5, self.delay * 0.3))
+
+                    # 达到最大数量则停止
+                    if self.max_notes > 0 and len(processed_ids) >= self.max_notes:
+                        print(f"[完成] 已处理 {len(processed_ids)} 个，达到最大限制")
+                        break
+
+                # 检查是否达到最大数量
+                if self.max_notes > 0 and len(processed_ids) >= self.max_notes:
+                    break
+
+                # 连续3次无新内容，判断已到底部
+                if no_change_rounds >= 3:
+                    print("[滚动完成] 连续3次无新笔记，已到底部")
+                    break
+
+                if scroll_round >= 30:
+                    print("[滚动完成] 已达最大滚动次数")
+                    break
+
+                # 向下滚动，继续加载
+                await page.evaluate('window.scrollBy(0, 800)')
+                await asyncio.sleep(1.5)
 
             await browser.close()
 
@@ -319,7 +319,8 @@ class XHSUserMonitor:
             if note.note_id not in unique_notes:
                 unique_notes[note.note_id] = note
 
-        print(f"[完成] 共获取到 {len(unique_notes)} 个唯一笔记")
+        notes_with_token = sum(1 for n in unique_notes.values() if 'xsec_token' in n.note_url)
+        print(f"[完成] 共获取 {len(unique_notes)} 个唯一笔记，其中 {notes_with_token} 个含 xsec_token")
         return list(unique_notes.values())
 
     async def fetch_user_notes_from_file(self, file_path: str) -> List[UserNote]:

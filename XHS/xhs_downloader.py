@@ -294,12 +294,17 @@ class XHSDownloader:
                 )
                 
                 if not result_list or len(result_list) == 0:
-                    print(f"[错误] 无法获取笔记数据: {url}")
+                    # 检查 URL 是否包含 xsec_token
+                    if 'xsec_token' not in url:
+                        print(f"[错误] 无法获取笔记数据（URL 缺少 xsec_token）: {url}")
+                        print(f"       下载他人笔记必须携带 xsec_token 参数，请使用带 token 的完整链接")
+                    else:
+                        print(f"[错误] 无法获取笔记数据（API 返回空，可能 Cookie 失效或被限流）: {url}")
                     return None
                 
                 result = result_list[0]
                 if not result or not isinstance(result, dict):
-                    print(f"[错误] 笔记数据格式错误: {url}")
+                    print(f"[错误] 笔记数据格式错误（收到: {type(result).__name__}）: {url}")
                     return None
                 
                 # 解析内容
