@@ -11,7 +11,7 @@ from httpx import (
     get,
 )
 
-from source.expansion import remove_empty_directories
+from XHS.source.expansion import remove_empty_directories
 
 from ..translation import _
 from .static import HEADERS, USERAGENT, WARNING

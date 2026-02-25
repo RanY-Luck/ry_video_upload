@@ -1,4 +1,4 @@
-from source.expansion import Namespace
+from XHS.source.expansion import Namespace
 
 from .request import Html
 

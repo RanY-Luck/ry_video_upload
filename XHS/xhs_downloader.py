@@ -14,10 +14,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dotenv import load_dotenv
-from source import XHS
-from source.expansion import Namespace
-from source.application.request import Html
-from source.application.video import Video
+from XHS.source import XHS
+from XHS.source.expansion import Namespace
+from XHS.source.application.request import Html
+from XHS.source.application.video import Video
 # 添加 source 模块路径
 sys.path.insert(0, str(Path(__file__).parent))
 

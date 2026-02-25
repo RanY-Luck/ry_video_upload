@@ -126,6 +126,12 @@ python standalone_dedup.py
 python Upload/vx_upload.py
 ```
 
+#### 🔵 检测到用户主页URL，自动使用 Playwright 获取笔记列表
+
+```bash
+python standalone_xhs.py --user-url "https://www.xiaohongshu.com/user/profile/5e8297920000000001001c90" --max-notes 5
+```
+
 ## 🛠️ 常见问题
 
 **Q: 采集时出现 403 Forbidden 错误？**
