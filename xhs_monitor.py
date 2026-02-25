@@ -33,15 +33,13 @@ import os
 import re
 import sys
 import time
+import httpx
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Set
-from urllib.parse import quote
-
-import httpx
+from typing import Dict, List, Set
 from dotenv import load_dotenv
 
-# 将 XHS 模块路径加入 Python 搜索路径
+# 将 XHS 模块路径加入 Python 搜索路径（必须在 import XHSDownloader 之前）
 sys.path.insert(0, str(Path(__file__).parent / "XHS"))
 from XHS.xhs_downloader import XHSDownloader
 
@@ -80,11 +78,11 @@ class BarkNotifier:
         return bool(self.bark_key)
 
     async def push(
-        self,
-        title: str,
-        body: str,
-        url: str = "",
-        group: str = "小红书监控",
+            self,
+            title: str,
+            body: str,
+            url: str = "",
+            group: str = "小红书监控",
     ) -> bool:
         """发送 Bark 推送通知（POST 方式）"""
         if not self.is_enabled():
@@ -125,13 +123,13 @@ class XHSBloggerMonitor:
     """
 
     def __init__(
-        self,
-        user_url: str,
-        download_dir: str,
-        downloader: XHSDownloader,
-        notifier: BarkNotifier,
-        seen_file_dir: Path,
-        cookie: str = "",
+            self,
+            user_url: str,
+            download_dir: str,
+            downloader: XHSDownloader,
+            notifier: BarkNotifier,
+            seen_file_dir: Path,
+            cookie: str = "",
     ):
         """
         Args:
@@ -199,7 +197,8 @@ class XHSBloggerMonitor:
 
     async def fetch_latest_notes(self) -> List[Dict]:
         """
-        使用 Playwright 访问博主主页，拦截 API 响应获取最新笔记列表。
+        使用 Playwright 访问博主主页，通过 DOM 解析 + __INITIAL_STATE__ 提取笔记列表。
+        （不再依赖 API 拦截，因为小红书安全盾会阻止 user_posted API 的发起）
 
         Returns:
             笔记信息列表，每项包含 note_id, title, xsec_token, note_url
@@ -217,14 +216,32 @@ class XHSBloggerMonitor:
 
         async with async_playwright() as p:
             logger.info(f"[浏览器] 启动 Chromium 检查博主 {self.user_id}...")
-            browser = await p.chromium.launch(headless=True)
+
+            browser = await p.chromium.launch(
+                headless=False,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-infobars",
+                    "--window-size=1280,900",
+                ],
+            )
             context = await browser.new_context(
-                user_agent=self.downloader.user_agent or (
+                user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0.0.0 Safari/537.36"
-                )
+                ),
+                viewport={"width": 1280, "height": 900},
+                locale="zh-CN",
             )
+
+            # 注入反检测脚本（隐藏 webdriver 标记）
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                window.chrome = {runtime: {}};
+            """)
 
             # 注入 Cookie
             if self.cookie:
@@ -233,85 +250,178 @@ class XHSBloggerMonitor:
                     item = item.strip()
                     if "=" in item:
                         name, value = item.split("=", 1)
-                        cookies.append(
-                            {
-                                "name": name.strip(),
-                                "value": value.strip(),
-                                "domain": ".xiaohongshu.com",
-                                "path": "/",
-                            }
-                        )
+                        cookies.append({
+                            "name": name.strip(),
+                            "value": value.strip(),
+                            "domain": ".xiaohongshu.com",
+                            "path": "/",
+                        })
                 if cookies:
                     await context.add_cookies(cookies)
+                    logger.info(f"[浏览器] 已注入 {len(cookies)} 个 Cookie")
+            else:
+                logger.warning("[浏览器] 未配置 Cookie，可能无法获取笔记数据")
 
             page = await context.new_page()
 
-            # 拦截 API 响应
-            async def handle_response(response):
-                nonlocal page_user_name
-                try:
-                    if (
-                        "xiaohongshu.com/api/sns/web" in response.url
-                        and response.status == 200
-                    ):
-                        try:
-                            json_data = await response.json()
-                        except Exception:
-                            return
-
-                        items = []
-                        if isinstance(json_data, dict):
-                            data_obj = json_data.get("data", {})
-                            if isinstance(data_obj, dict):
-                                # /api/sns/web/v1/user_posted / homefeed
-                                items = (
-                                    data_obj.get("notes")
-                                    or data_obj.get("items")
-                                    or []
-                                )
-                                # 顺便捕获博主昵称
-                                user_info = data_obj.get("user", {})
-                                if user_info and not page_user_name:
-                                    page_user_name = user_info.get("nickname", "")
-
-                        for item in items:
-                            note_card = item.get("note_card", item)
-                            note_id = note_card.get("id") or note_card.get("note_id")
-                            if not note_id:
-                                continue
-
-                            title = (
-                                note_card.get("display_title")
-                                or note_card.get("title")
-                                or "无标题"
-                            )
-                            token = note_card.get("xsec_token", "")
-
-                            # 优先保留有 token 的版本
-                            if note_id not in captured or (
-                                token and not captured[note_id].get("xsec_token")
-                            ):
-                                captured[note_id] = {
-                                    "note_id": note_id,
-                                    "title": title,
-                                    "xsec_token": token,
-                                }
-                except Exception:
-                    pass
-
-            page.on("response", handle_response)
-
             try:
-                await page.goto(user_profile_url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(2500)
+                await page.goto(user_profile_url, wait_until="domcontentloaded", timeout=40000)
+                # 等待页面渲染完成
+                await page.wait_for_timeout(5000)
 
-                # 刷新一次以触发 API 请求
-                await page.reload(wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(2500)
+                # 向下滚动以加载更多笔记卡片
+                for _ in range(3):
+                    await page.evaluate("window.scrollBy(0, 800)")
+                    await asyncio.sleep(1.5)
 
-                # 向下滚动一屏，加载更多笔记
-                await page.evaluate("window.scrollBy(0, 800)")
-                await asyncio.sleep(1.5)
+                # ===== 策略1：从 __INITIAL_STATE__ 提取 SSR 预渲染数据 =====
+                try:
+                    initial_state = await page.evaluate("""
+                        () => {
+                            try {
+                                const state = window.__INITIAL_STATE__;
+                                if (!state) return null;
+                                // Playwright 需要返回可序列化对象，这里直接提取核心字段
+                                const result = {user: {}, notes: []};
+
+                                // 提取用户信息
+                                if (state.user && state.user.userPageData) {
+                                    const u = state.user.userPageData;
+                                    result.user = {nickname: u.basicInfo?.nickname || ''};
+                                    // 提取用户发布的笔记
+                                    const notes = u.notes || [];
+                                    for (const n of notes) {
+                                        if (n.id || n.noteId) {
+                                            result.notes.push({
+                                                note_id: n.id || n.noteId || '',
+                                                title: n.displayTitle || n.title || '',
+                                                xsec_token: n.xsecToken || '',
+                                            });
+                                        }
+                                    }
+                                }
+
+                                // 尝试从 feed 路径读取
+                                if (result.notes.length === 0 && state.feed) {
+                                    const feeds = Object.values(state.feed);
+                                    for (const feed of feeds) {
+                                        if (feed && Array.isArray(feed.items)) {
+                                            for (const item of feed.items) {
+                                                const nc = item.noteCard || item;
+                                                const nid = nc.id || nc.noteId || item.id || '';
+                                                if (nid) {
+                                                    result.notes.push({
+                                                        note_id: nid,
+                                                        title: nc.displayTitle || nc.title || '',
+                                                        xsec_token: nc.xsecToken || '',
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                return result;
+                            } catch(e) {
+                                return {error: e.toString()};
+                            }
+                        }
+                    """)
+
+                    if initial_state and not initial_state.get("error"):
+                        nickname = initial_state.get("user", {}).get("nickname", "")
+                        if nickname and not page_user_name:
+                            page_user_name = nickname
+
+                        ssr_notes = initial_state.get("notes", [])
+                        if ssr_notes:
+                            logger.info(f"[SSR] 从 __INITIAL_STATE__ 提取到 {len(ssr_notes)} 条笔记")
+                        for n in ssr_notes:
+                            nid = n.get("note_id", "")
+                            if nid and nid not in captured:
+                                captured[nid] = n
+                    elif initial_state and initial_state.get("error"):
+                        logger.warning(f"[SSR] __INITIAL_STATE__ 解析异常: {initial_state['error']}")
+                    else:
+                        logger.info("[SSR] __INITIAL_STATE__ 为空或不存在")
+                except Exception as e:
+                    logger.warning(f"[SSR] 提取 __INITIAL_STATE__ 失败: {e}")
+
+                # ===== 策略2：从 DOM 页面元素提取笔记链接 =====
+                try:
+                    dom_notes = await page.evaluate("""
+                        () => {
+                            const results = [];
+                            // 查找所有笔记卡片链接（多种选择器兼容）
+                            const selectors = [
+                                'a[href*="/explore/"]',
+                                'a[href*="/discovery/item/"]',
+                                'a[href*="xsec_token"]',
+                                'section.note-item a',
+                                'div.note-item a',
+                                '.feeds-container a[href*="/explore/"]',
+                            ];
+                            const seen = new Set();
+                            for (const sel of selectors) {
+                                const links = document.querySelectorAll(sel);
+                                for (const a of links) {
+                                    const href = a.href || a.getAttribute('href') || '';
+                                    // 从 href 提取 note_id
+                                    const m = href.match(/\\/explore\\/([a-f0-9]+)/i)
+                                             || href.match(/\\/discovery\\/item\\/([a-f0-9]+)/i);
+                                    if (!m) continue;
+                                    const noteId = m[1];
+                                    if (seen.has(noteId)) continue;
+                                    seen.add(noteId);
+
+                                    // 提取 xsec_token
+                                    const tokenMatch = href.match(/xsec_token=([^&]+)/);
+                                    const token = tokenMatch ? decodeURIComponent(tokenMatch[1]) : '';
+
+                                    // 提取标题（从卡片文字元素）
+                                    const titleEl = a.querySelector('.title, .note-title, span, footer span');
+                                    const title = (titleEl ? titleEl.textContent : '') || a.textContent || '';
+
+                                    results.push({
+                                        note_id: noteId,
+                                        title: title.trim().substring(0, 100),
+                                        xsec_token: token,
+                                    });
+                                }
+                            }
+                            return results;
+                        }
+                    """)
+
+                    if dom_notes:
+                        logger.info(f"[DOM] 从页面 DOM 提取到 {len(dom_notes)} 条笔记链接")
+                        for n in dom_notes:
+                            nid = n.get("note_id", "")
+                            token = n.get("xsec_token", "")
+                            # 补充或更新（优先保留有 token 的）
+                            if nid and (nid not in captured or (token and not captured[nid].get("xsec_token"))):
+                                captured[nid] = n
+                    else:
+                        logger.warning("[DOM] 未从 DOM 中找到任何笔记链接")
+
+                except Exception as e:
+                    logger.warning(f"[DOM] DOM 提取异常: {e}")
+
+                # ===== 策略3：打印页面截图路径供人工排查 =====
+                if not captured:
+                    debug_path = str(self.download_dir / f"debug_{self.user_id}.png")
+                    try:
+                        await page.screenshot(path=debug_path, full_page=True)
+                        logger.warning(f"[调试] 未获取到笔记，已保存页面截图: {debug_path}")
+                    except Exception:
+                        pass
+
+                    # 打印页面 URL 和标题，确认是否跳转
+                    current_url = page.url
+                    page_title = await page.title()
+                    logger.info(f"[调试] 当前页面 URL: {current_url}")
+                    logger.info(f"[调试] 当前页面标题: {page_title}")
+
             except Exception as e:
                 logger.warning(f"[浏览器] 页面加载异常: {e}")
             finally:
@@ -332,14 +442,12 @@ class XHSBloggerMonitor:
                 )
             else:
                 note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
-            notes.append(
-                {
-                    "note_id": note_id,
-                    "title": note_data["title"],
-                    "xsec_token": token,
-                    "note_url": note_url,
-                }
-            )
+            notes.append({
+                "note_id": note_id,
+                "title": note_data.get("title", ""),
+                "xsec_token": token,
+                "note_url": note_url,
+            })
 
         logger.info(f"[API] 共捕获 {len(notes)} 个笔记（博主: {self.user_id}）")
         return notes
@@ -427,13 +535,13 @@ class XHSMonitorScheduler:
     """
 
     def __init__(
-        self,
-        user_urls: List[str],
-        interval: int = 600,
-        download_dir: str = "downloads/xhs_monitor",
-        cookie: str = "",
-        bark_key: str = "",
-        run_once: bool = False,
+            self,
+            user_urls: List[str],
+            interval: int = 600,
+            download_dir: str = "downloads/xhs_monitor",
+            cookie: str = "",
+            bark_key: str = "",
+            run_once: bool = False,
     ):
         """
         Args:
@@ -517,14 +625,16 @@ class XHSMonitorScheduler:
         round_num = 0
         while True:
             round_num += 1
-            logger.info(f"\n{'='*60}")
+            logger.info(f"\n{'=' * 60}")
             logger.info(f"  第 {round_num} 轮检查  |  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            logger.info(f"{'='*60}")
+            logger.info(f"{'=' * 60}")
 
             await self.run_round()
 
             logger.info(f"[调度] 本轮完成，{self.interval} 秒后进行下一轮检查...")
-            logger.info(f"[调度] 下次检查时间: {datetime.fromtimestamp(time.time() + self.interval).strftime('%H:%M:%S')}")
+            logger.info(
+                f"[调度] 下次检查时间: {datetime.fromtimestamp(time.time() + self.interval).strftime('%H:%M:%S')}"
+            )
 
             try:
                 await asyncio.sleep(self.interval)
