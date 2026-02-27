@@ -716,42 +716,43 @@ class XHSUploader:
             await page.wait_for_timeout(1000)
 
             # ── 步骤 7：等待上传完成，点击发布按钮 ───────────────────
-            # 图片/视频上传到服务器需要时间，发布按钮可能处于 disabled 状态
-            # 策略：最多等 120 秒（10次×12秒），直到按钮从 disabled 变为可用
-            logger.info("[上传] 等待媒体上传至服务器完成...")
+            # 策略：直接轮询发布按钮状态（不依赖 progress/loading 元素检测，
+            #        因为页面上存在与上传无关的 progress/loading class 元素会导致误判）
+            # - 按钮存在且 disabled → 视频仍在上传，继续等待
+            # - 按钮存在且可点击   → 立即发布
+            # - 按钮不存在         → 继续等待，最多 MAX_WAIT_ROUNDS 轮
+            logger.info("[上传] 等待媒体上传至服务器完成（轮询发布按钮）...")
 
             publish_btn = None
-            MAX_WAIT_ROUNDS = 10   # 最多重试轮数
-            WAIT_PER_ROUND = 12    # 每轮等待秒数
+            MAX_WAIT_ROUNDS = 25   # 最多等待轮数（视频文件可能较大）
+            WAIT_PER_ROUND = 12    # 每轮等待秒数（共最多 300 秒）
 
             for attempt in range(MAX_WAIT_ROUNDS):
-                # 检查是否还在上传中（有进度条/loading元素）
-                uploading = await page.query_selector(
-                    '[class*="uploading"], [class*="progress"]:not([value="100"]), '
-                    '[class*="loading"]:not([class*="button"]):not([class*="btn"])'
-                )
-                if uploading:
-                    logger.info(f"[上传] 第 {attempt+1} 轮：检测到上传进度元素，等待 {WAIT_PER_ROUND} 秒...")
-                    await page.wait_for_timeout(WAIT_PER_ROUND * 1000)
-                    continue
-
-                # 找发布按钮：文字精确匹配"发布"，可见，未禁用
+                # 找发布按钮：文字精确匹配"发布"，可见
                 btns = await page.query_selector_all("button")
+                found_disabled = False
                 for btn in btns:
                     if not await btn.is_visible():
                         continue
                     btn_text = (await btn.inner_text()).strip()
-                    is_disabled = await btn.get_attribute("disabled")
                     if btn_text == "发布":
+                        is_disabled = await btn.get_attribute("disabled")
                         if is_disabled is None:
                             publish_btn = btn
-                            logger.info(f"[上传] ✓ 找到可用发布按钮（第 {attempt+1} 轮）")
+                            logger.info(f"[上传] ✓ 找到可用发布按钮（第 {attempt+1} 轮，已等待 {attempt * WAIT_PER_ROUND} 秒）")
                         else:
-                            logger.info(f"[上传] 第 {attempt+1} 轮：发布按钮 disabled，等待 {WAIT_PER_ROUND} 秒...")
+                            found_disabled = True
+                            logger.info(f"[上传] 第 {attempt+1} 轮：发布按钮 disabled（上传中），等待 {WAIT_PER_ROUND} 秒...")
                         break
 
                 if publish_btn:
                     break
+
+                if not found_disabled and attempt > 0:
+                    # 找不到任何发布按钮（可能页面异常），截图辅助排查
+                    logger.warning(f"[上传] 第 {attempt+1} 轮：未找到任何\"发布\"按钮，继续等待...")
+                    if attempt % 5 == 4:  # 每 5 轮截一次图
+                        await _save_debug_screenshot(page, f"{title}_wait_{attempt+1}")
 
                 await page.wait_for_timeout(WAIT_PER_ROUND * 1000)
 
