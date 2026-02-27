@@ -420,50 +420,53 @@ class XHSUploader:
                 logger.warning("[上传] .creator-tab 超时，继续等待 3 秒")
                 await page.wait_for_timeout(3000)
 
-            # ── 步骤 2：切换到对应 tab（视频 or 图文）────────────────
-            # DOM: div.creator-tab 列表，"上传视频" 或 "上传图文"
+            # ── 步骤 2：切换到对应 tab（用 JS 找可见元素后 evaluate click，避免视口外超时）
+            # 实测：4个 .creator-tab 中有1个隐藏（BoundingRect 在负坐标区），需过滤
             tab_keyword = "图文" if note_type == "image" else "视频"
             switched = False
-            tabs = await page.query_selector_all(".creator-tab")
-            logger.info(f"[上传] 发现 {len(tabs)} 个 .creator-tab，目标关键字: '{tab_keyword}'")
-            for tab in tabs:
-                text = (await tab.inner_text()).strip()
-                logger.info(f"[上传]   tab 文字: '{text}'")
-                if tab_keyword in text:
-                    await tab.click()
-                    await page.wait_for_timeout(1500)
-                    logger.info(f"[上传] ✓ 已点击 tab: '{text}'")
-                    switched = True
-                    break
 
-            if not switched:
-                logger.warning(f"[上传] 未找到含'{tab_keyword}'的 tab，截图后继续")
+            # 用 JS 找到可见且含关键字的 tab，直接在页面内点击（绕过 Playwright 的视口检测）
+            clicked = await page.evaluate(f"""
+                () => {{
+                    const tabs = Array.from(document.querySelectorAll('.creator-tab'));
+                    for (const tab of tabs) {{
+                        const rect = tab.getBoundingClientRect();
+                        const visible = rect.width > 0 && rect.height > 0 && rect.x >= 0 && rect.y >= 0;
+                        if (visible && tab.textContent.includes('{tab_keyword}')) {{
+                            tab.click();
+                            return tab.textContent.trim();
+                        }}
+                    }}
+                    return null;
+                }}
+            """)
+            if clicked:
+                await page.wait_for_timeout(1500)
+                logger.info(f"[上传] ✓ 已通过 JS 点击 tab: '{clicked}'")
+                switched = True
+            else:
+                logger.warning(f"[上传] JS 方式未找到可见的'{tab_keyword}' tab，截图后继续")
                 await _save_debug_screenshot(page, f"{title}_no_tab")
 
             # ── 步骤 3：等待 input 就绪，上传媒体文件 ─────────────────
             upload_input = None
 
             if note_type == "video":
-                # 视频模式：input.upload-input，accept 含 mp4，multiple=false
+                # 视频模式：input.upload-input，accept 含 mp4
                 try:
-                    await page.wait_for_selector(
-                        'input.upload-input[accept*="mp4"]',
-                        timeout=8000,
-                    )
+                    await page.wait_for_selector('input.upload-input[accept*="mp4"]', timeout=8000)
                     upload_input = await page.query_selector('input.upload-input[accept*="mp4"]')
-                    logger.info("[上传] ✓ 找到视频 file input（accept 含 mp4）")
+                    logger.info("[上传] ✓ 找到视频 file input")
                 except Exception:
                     upload_input = await page.query_selector("input.upload-input")
                     if upload_input:
-                        accept = await upload_input.get_attribute("accept") or ""
-                        logger.info(f"[上传] ✓ 找到 upload-input（降级，accept={accept}）")
+                        logger.info("[上传] ✓ 找到 upload-input（降级）")
 
                 if not upload_input:
                     logger.error("[上传] ✗ 未找到视频上传 input")
                     await _save_debug_screenshot(page, f"{title}_no_input")
                     return False
 
-                # 视频只取第一个文件
                 vfile = next((p for p in video_paths if p.exists()), None)
                 if not vfile:
                     logger.error("[上传] ✗ 视频文件不存在")
@@ -474,17 +477,13 @@ class XHSUploader:
             else:
                 # 图文模式：input.upload-input，accept 含 jpg，multiple=true
                 try:
-                    await page.wait_for_selector(
-                        'input.upload-input[accept*="jpg"]',
-                        timeout=8000,
-                    )
+                    await page.wait_for_selector('input.upload-input[accept*="jpg"]', timeout=8000)
                     upload_input = await page.query_selector('input.upload-input[accept*="jpg"]')
-                    logger.info("[上传] ✓ 找到图文 file input（accept 含 jpg）")
+                    logger.info("[上传] ✓ 找到图文 file input")
                 except Exception:
                     upload_input = await page.query_selector("input.upload-input")
                     if upload_input:
-                        accept = await upload_input.get_attribute("accept") or ""
-                        logger.info(f"[上传] ✓ 找到 upload-input（降级，accept={accept}）")
+                        logger.info("[上传] ✓ 找到 upload-input（降级）")
 
                 if not upload_input:
                     logger.error("[上传] ✗ 未找到图片上传 input")
@@ -501,17 +500,12 @@ class XHSUploader:
                 logger.info(f"[上传] 正在上传 {len(file_list)} 张图片: {[Path(f).name for f in file_list]}")
                 await upload_input.set_input_files(file_list)
 
-
-            # ── 步骤 4：等待图片上传并等编辑区动态渲染 ────────────────
-            logger.info("[上传] 等待图片上传完成及编辑区渲染...")
+            # ── 步骤 4：等待编辑区渲染（上传后动态注入） ──────────────
+            # 实测：标题框为 input.d-text，正文为 div.tiptap.ProseMirror
+            logger.info("[上传] 等待编辑区渲染...")
             try:
-                # 上传后，页面会动态渲染标题输入框
                 await page.wait_for_selector(
-                    'input[class*="title"], '
-                    'input[placeholder*="标题"], '
-                    'div[contenteditable="true"], '
-                    'div[class*="preview-item"], '
-                    'div[class*="img-container"]',
+                    'input.d-text, input[placeholder*="填写标题"], div.ProseMirror',
                     timeout=60000,
                 )
                 logger.info("[上传] ✓ 编辑区已渲染")
@@ -522,16 +516,17 @@ class XHSUploader:
             await page.wait_for_timeout(2000)
             await _save_debug_screenshot(page, f"{title}_after_upload")
 
-            # ── 步骤 5：填写标题（最多 20 字）─────────────────────────
+            # ── 步骤 5：填写标题 ──────────────────────────────────────
+            # 实测：input.d-text，placeholder="填写标题会有更多赞哦"
             title_short = title[:20]
             title_input = (
-                await page.query_selector('input[class*="title"]')
+                await page.query_selector('input.d-text')
+                or await page.query_selector('input[placeholder*="填写标题"]')
                 or await page.query_selector('input[placeholder*="标题"]')
-                or await page.query_selector('input[placeholder*="填写"]')
             )
             if title_input:
                 await title_input.click()
-                await title_input.triple_click()  # 全选旧内容再填写
+                await title_input.click(click_count=3)
                 await title_input.fill(title_short)
                 logger.info(f"[上传] ✓ 已填写标题: {title_short}")
             else:
@@ -540,55 +535,78 @@ class XHSUploader:
             await page.wait_for_timeout(500)
 
             # ── 步骤 6：填写正文描述 ──────────────────────────────────
-            # 正文编辑器通常是 contenteditable div（Quill-like 编辑器）
+            # 实测：div.tiptap.ProseMirror[contenteditable="true"]（ProseMirror 富文本）
+            # ProseMirror 不支持 fill()，必须 click() 后用 keyboard.type()
             desc_input = (
-                await page.query_selector('div.ql-editor[contenteditable="true"]')
-                or await page.query_selector('div[contenteditable="true"][class*="editor"]')
-                or await page.query_selector('div[contenteditable="true"][data-placeholder*="正文"]')
-                or await page.query_selector('div[contenteditable="true"][placeholder*="正文"]')
+                await page.query_selector('div.tiptap.ProseMirror[contenteditable="true"]')
+                or await page.query_selector('div.ProseMirror[contenteditable="true"]')
+                or await page.query_selector('div.tiptap[contenteditable="true"]')
             )
-            # 降级：取第二个 contenteditable（第一个通常是标题区域）
+            # 降级：找所有可见 contenteditable，取第一个非标题的
             if not desc_input:
                 all_editable = await page.query_selector_all('div[contenteditable="true"]')
-                if len(all_editable) >= 2:
-                    desc_input = all_editable[1]
-                    logger.info("[上传] 使用第 2 个 contenteditable 作为正文区")
-                elif len(all_editable) == 1:
-                    desc_input = all_editable[0]
+                visible_editable = []
+                for el in all_editable:
+                    if await el.is_visible():
+                        visible_editable.append(el)
+                if visible_editable:
+                    desc_input = visible_editable[0]
+                    logger.info(f"[上传] 降级：找到 {len(visible_editable)} 个可见 contenteditable，取第1个")
 
             if desc_input:
                 await desc_input.click()
+                await page.wait_for_timeout(300)
                 full_desc = description if description else title
-                try:
-                    await desc_input.fill(full_desc)
-                except Exception:
-                    # 部分富文本编辑器 fill 不生效，改用 type
-                    await page.keyboard.type(full_desc)
+                # ProseMirror 需要用 keyboard.type 而非 fill
+                await page.keyboard.type(full_desc, delay=30)
                 logger.info(f"[上传] ✓ 已填写正文 ({len(full_desc)} 字)")
             else:
                 logger.warning("[上传] 未找到正文输入框，跳过")
 
             await page.wait_for_timeout(1000)
 
-            # ── 步骤 7：点击发布按钮 ──────────────────────────────────
+            # ── 步骤 7：等待上传完成，点击发布按钮 ───────────────────
+            # 图片/视频上传到服务器需要时间，发布按钮可能处于 disabled 状态
+            # 策略：最多等 120 秒（10次×12秒），直到按钮从 disabled 变为可用
+            logger.info("[上传] 等待媒体上传至服务器完成...")
+
             publish_btn = None
-            # 遍历所有 button，找到未禁用且含"发布"的
-            for attempt in range(2):
-                if attempt == 1:
-                    await page.wait_for_timeout(2000)  # 再等图片处理完
+            MAX_WAIT_ROUNDS = 10   # 最多重试轮数
+            WAIT_PER_ROUND = 12    # 每轮等待秒数
+
+            for attempt in range(MAX_WAIT_ROUNDS):
+                # 检查是否还在上传中（有进度条/loading元素）
+                uploading = await page.query_selector(
+                    '[class*="uploading"], [class*="progress"]:not([value="100"]), '
+                    '[class*="loading"]:not([class*="button"]):not([class*="btn"])'
+                )
+                if uploading:
+                    logger.info(f"[上传] 第 {attempt+1} 轮：检测到上传进度元素，等待 {WAIT_PER_ROUND} 秒...")
+                    await page.wait_for_timeout(WAIT_PER_ROUND * 1000)
+                    continue
+
+                # 找发布按钮：文字精确匹配"发布"，可见，未禁用
                 btns = await page.query_selector_all("button")
                 for btn in btns:
+                    if not await btn.is_visible():
+                        continue
                     btn_text = (await btn.inner_text()).strip()
                     is_disabled = await btn.get_attribute("disabled")
-                    if "发布" in btn_text and is_disabled is None:
-                        publish_btn = btn
-                        logger.info(f"[上传] 找到发布按钮: '{btn_text}'")
+                    if btn_text == "发布":
+                        if is_disabled is None:
+                            publish_btn = btn
+                            logger.info(f"[上传] ✓ 找到可用发布按钮（第 {attempt+1} 轮）")
+                        else:
+                            logger.info(f"[上传] 第 {attempt+1} 轮：发布按钮 disabled，等待 {WAIT_PER_ROUND} 秒...")
                         break
+
                 if publish_btn:
                     break
 
+                await page.wait_for_timeout(WAIT_PER_ROUND * 1000)
+
             if not publish_btn:
-                logger.error("[上传] ✗ 未找到可用的发布按钮")
+                logger.error(f"[上传] ✗ 等待 {MAX_WAIT_ROUNDS * WAIT_PER_ROUND} 秒后仍未找到可用发布按钮")
                 await _save_debug_screenshot(page, f"{title}_no_publish_btn")
                 return False
 
