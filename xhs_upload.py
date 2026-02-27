@@ -39,6 +39,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+try:
+    import dashscope
+    from dashscope import Generation
+    DASHSCOPE_AVAILABLE = True
+except ImportError:
+    DASHSCOPE_AVAILABLE = False
+
+try:
+    import requests as _requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+
 from dotenv import load_dotenv
 
 # ==========================================
@@ -71,6 +84,143 @@ HISTORY_FILE = Path("logs/xhs_upload_history.txt")
 
 # 两次上传之间休眠时间（秒），避免风控
 UPLOAD_SLEEP = 30
+
+# AI 润色模型
+AI_MODEL = "qwen-turbo"
+
+# Bark 服务器
+BARK_SERVER = "https://api.day.app"
+
+
+# ==========================================
+# AI 润色
+# ==========================================
+class XHSAIPolisher:
+    """
+    使用阿里百炼 qwen-turbo 对小红书笔记标题和正文进行润色二创。
+    失败时安全降级，返回原始文案，不阻断上传流程。
+    """
+
+    def __init__(self):
+        self.api_key = os.getenv("DASHSCOPE_API_KEY", "")
+        self.available = DASHSCOPE_AVAILABLE and bool(self.api_key)
+        if self.available:
+            dashscope.api_key = self.api_key
+
+    def polish(self, title: str, description: str) -> Dict[str, str]:
+        """
+        润色标题和描述。
+
+        Args:
+            title:       原始标题
+            description: 原始正文
+
+        Returns:
+            {"title": 润色后标题, "description": 润色后正文}
+            失败时返回原始值。
+        """
+        if not self.available:
+            if not DASHSCOPE_AVAILABLE:
+                logger.warning("[AI润色] dashscope 未安装，跳过润色（pip install dashscope）")
+            else:
+                logger.warning("[AI润色] 未配置 DASHSCOPE_API_KEY，跳过润色")
+            return {"title": title, "description": description}
+
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f"[AI润色] 正在润色: {title[:30]}（第 {attempt}/{max_retries} 次）")
+
+                prompt = f"""请对以下小红书笔记进行润色二创，保留原意，风格更活泼自然，适合小红书平台。
+要求：
+- 标题：控制在 20 字以内，加入情感钩子，可用 1-2 个 emoji
+- 正文：保留原有核心信息，语气更亲切，适当加 emoji，结尾可追加 3~5 个话题标签（#话题 格式）
+- 严格按以下 JSON 格式输出，不要输出任何其他内容：
+{{
+  "title": "润色后的标题",
+  "description": "润色后的正文"
+}}
+
+原始标题：{title}
+原始正文：{description if description else '（无正文）'}"""
+
+                response = Generation.call(
+                    model=AI_MODEL,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是一位拥有 5 年经验的小红书爆款文案专家，擅长把普通文案改写成高互动率笔记。",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    result_format="message",
+                )
+
+                if response.status_code != 200:
+                    raise ValueError(f"API 返回异常状态码: {response.status_code}, 信息: {response.message}")
+
+                raw = response.output.choices[0].message.content.strip()
+
+                # 提取 JSON（兼容 AI 在回答前/后多余文字的情况）
+                json_match = re.search(r'\{[\s\S]*\}', raw)
+                if not json_match:
+                    raise ValueError(f"未找到 JSON 内容，原始输出: {raw[:200]}")
+
+                result = json.loads(json_match.group())
+                polished_title = result.get("title", "").strip() or title
+                polished_desc = result.get("description", "").strip() or description
+
+                logger.info(f"[AI润色] ✅ 润色完成")
+                logger.info(f"[AI润色] 标题: {title[:20]} → {polished_title[:30]}")
+                return {"title": polished_title, "description": polished_desc}
+
+            except Exception as e:
+                logger.warning(f"[AI润色] ⚠️ 第 {attempt} 次失败: {e}")
+                if attempt < max_retries:
+                    time.sleep(2)
+
+        logger.error("[AI润色] ❌ 润色最终失败，使用原始文案继续上传")
+        return {"title": title, "description": description}
+
+
+# ==========================================
+# Bark 推送
+# ==========================================
+def bark_notify_success(note_title: str):
+    """
+    上传成功后推送 Bark 通知。
+    安全调用，失败时仅打印警告，不影响主流程。
+
+    Args:
+        note_title: 已发布的笔记标题
+    """
+    if not REQUESTS_AVAILABLE:
+        logger.warning("[Bark] requests 未安装，跳过推送")
+        return
+
+    bark_key = os.getenv("BARK_KEY", "").strip()
+    if not bark_key:
+        logger.warning("[Bark] 未配置 BARK_KEY，跳过推送")
+        return
+
+    try:
+        title_encoded = "📤 小红书笔记已发布"
+        body = note_title[:50]  # Bark URL 参数，控制长度
+        url = f"{BARK_SERVER}/{bark_key}/{title_encoded}/{body}"
+        params = {
+            "group": "小红书上传",
+            "sound": "fanfare",
+            "icon": "https://api.iconify.design/mdi:note-check-outline.svg",
+        }
+        resp = _requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        result = resp.json()
+        if result.get("code") == 200:
+            logger.info(f"[Bark] ✅ 推送成功: {note_title[:20]}")
+        else:
+            logger.warning(f"[Bark] 推送返回: {result}")
+    except Exception as e:
+        logger.warning(f"[Bark] 推送失败（不影响上传）: {e}")
 
 
 # ==========================================
@@ -680,6 +830,9 @@ class XHSUploader:
         success = 0
         fail = 0
 
+        # 初始化 AI 润色器（在浏览器启动前完成，避免异步干扰）
+        ai_polisher = XHSAIPolisher()
+
         pw = await async_playwright().start()
         browser = await pw.chromium.launch(
             headless=False,
@@ -739,8 +892,13 @@ class XHSUploader:
                 else:
                     logger.info(f"[进度] ID: {note_id} | 图片: {len(images)} 张")
 
+                # ── AI 润色文案（上传前） ─────────────────────────────
+                polished = ai_polisher.polish(title, description)
+                upload_title = polished["title"]
+                upload_desc = polished["description"]
+
                 ok = await self.upload_note(
-                    page, title, description,
+                    page, upload_title, upload_desc,
                     image_paths=images,
                     note_type=note_type,
                     video_paths=videos,
@@ -751,6 +909,8 @@ class XHSUploader:
                     if history:
                         history.add(note_id)
                     logger.info(f"[进度] ✓ 第 {idx} 篇上传成功")
+                    # ── Bark 推送通知 ────────────────────────────────
+                    bark_notify_success(upload_title)
                 else:
                     fail += 1
                     logger.warning(f"[进度] ✗ 第 {idx} 篇上传失败")
