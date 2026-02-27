@@ -24,7 +24,6 @@
   # 指定多个博主
   python xhs_monitor.py --users "url1,url2"
 """
-
 import argparse
 import asyncio
 import json
@@ -356,6 +355,16 @@ class XHSBloggerMonitor:
             for i, url in enumerate(urls):
                 if not url:
                     continue
+                
+                # 修复: 补全缺少协议的 URL (如 //sns-img-bd.xhscdn.com/...)
+                if url.startswith("//"):
+                    url = "https:" + url
+                    
+                # 修复: httpx 无法下载 blob: URL，需跳过或使用备用方案
+                if url.startswith("blob:"):
+                    logger.warning(f"[下载] ✗ 无法直接下载 blob URL (需使用 API 获取真实地址): {url}")
+                    continue
+
                 # 确定文件扩展名
                 ext = "jpg"
                 if "video" in url or ".mp4" in url:
@@ -544,6 +553,21 @@ class XHSBloggerMonitor:
                     )
                     text_file.write_text(text_content, encoding="utf-8")
 
+                    # 处理 blob视频 (从 API 中获取真实下载链接)
+                    if note_video and note_video.startswith("blob:"):
+                        logger.info(f"[转换] 视频是 blob 链接，正调用 API 提取真实地址: {note_id}")
+                        try:
+                            video_info = await self.downloader.get_info(current_url)
+                            if video_info and video_info.download_urls:
+                                note_video = video_info.download_urls[0]
+                                logger.info(f"[转换] 成功获取真实视频地址: {note_video[:50]}...")
+                            else:
+                                logger.warning("[转换] 无法通过 API 获取真实视频地址")
+                                note_video = ""
+                        except Exception as e:
+                            logger.error(f"[转换] 提取真实视频地址失败: {e}")
+                            note_video = ""
+
                     # 下载媒体文件
                     media_urls = []
                     if note_video:
@@ -554,7 +578,7 @@ class XHSBloggerMonitor:
                         dl_count = await self._download_media(media_urls, save_dir, safe_title)
                         logger.info(f"[下载] 媒体下载完成: {dl_count}/{len(media_urls)}")
                     else:
-                        logger.warning("[下载] 未提取到任何媒体文件 URL")
+                        logger.warning("[下载] 未提取到任何有效媒体文件 URL")
 
                     download_success += 1
                     logger.info(f"[下载] ✓ 成功: {note_title[:30]}")
