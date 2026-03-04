@@ -26,47 +26,36 @@
   # 指定间隔（秒），默认 300 秒
   python xhs_upload.py --interval 600
 """
-
 import argparse
 import asyncio
 import json
-import logging
 import os
 import re
-import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from dotenv import load_dotenv
+
+from Upload.utils.utils_common import setup_logging
 
 try:
     import dashscope
     from dashscope import Generation
+
     DASHSCOPE_AVAILABLE = True
 except ImportError:
     DASHSCOPE_AVAILABLE = False
 
 try:
     import requests as _requests
+
     REQUESTS_AVAILABLE = True
 except ImportError:
     REQUESTS_AVAILABLE = False
 
-from dotenv import load_dotenv
-
-# ==========================================
-# 日志配置
-# ==========================================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-logger = logging.getLogger("xhs_upload")
-
+# 配置日志
+logger = setup_logging('logs/xhs_upload.log')
 # ==========================================
 # 常量
 # ==========================================
@@ -84,12 +73,6 @@ HISTORY_FILE = Path("logs/xhs_upload_history.txt")
 
 # 两次上传之间休眠时间（秒），避免风控
 UPLOAD_SLEEP = 30
-
-# AI 润色模型
-AI_MODEL = "qwen-turbo"
-
-# Bark 服务器
-BARK_SERVER = "https://api.day.app"
 
 
 # ==========================================
@@ -145,7 +128,7 @@ class XHSAIPolisher:
 原始正文：{description if description else '（无正文）'}"""
 
                 response = Generation.call(
-                    model=AI_MODEL,
+                    model=os.getenv("AI_MODEL", ""),
                     messages=[
                         {
                             "role": "system",
@@ -197,7 +180,10 @@ def bark_notify_success(note_title: str):
     if not REQUESTS_AVAILABLE:
         logger.warning("[Bark] requests 未安装，跳过推送")
         return
-
+    BARK_SERVER = os.getenv("BARK_SERVER", "").strip()
+    if not BARK_SERVER:
+        logger.warning("[Bark] 未配置 BARK_SERVER，跳过推送")
+        return
     bark_key = os.getenv("BARK_KEY", "").strip()
     if not bark_key:
         logger.warning("[Bark] 未配置 BARK_KEY，跳过推送")
@@ -359,13 +345,13 @@ def parse_note_folder(folder: Path) -> Optional[Dict]:
 
     return {
         "note_id": note_id,
-        "note_type": note_type,    # "video" 或 "image"
+        "note_type": note_type,  # "video" 或 "image"
         "folder": folder,
         "title": title,
         "author": author,
         "description": description,
-        "images": image_files,     # 图文笔记时使用
-        "videos": video_files,     # 视频笔记时使用
+        "images": image_files,  # 图文笔记时使用
+        "videos": video_files,  # 视频笔记时使用
     }
 
 
@@ -446,12 +432,14 @@ class XHSUploader:
             if "=" not in item:
                 continue
             name, value = item.split("=", 1)
-            cookies.append({
-                "name": name.strip(),
-                "value": value.strip(),
-                "domain": ".xiaohongshu.com",
-                "path": "/",
-            })
+            cookies.append(
+                {
+                    "name": name.strip(),
+                    "value": value.strip(),
+                    "domain": ".xiaohongshu.com",
+                    "path": "/",
+                }
+            )
         return cookies
 
     async def _inject_cookies(self, context):
@@ -525,13 +513,13 @@ class XHSUploader:
             logger.warning(f"[登录] 保存 Cookie 失败: {e}")
 
     async def upload_note(
-        self,
-        page,
-        title: str,
-        description: str,
-        image_paths: List[Path],
-        note_type: str = "image",
-        video_paths: Optional[List[Path]] = None,
+            self,
+            page,
+            title: str,
+            description: str,
+            image_paths: List[Path],
+            note_type: str = "image",
+            video_paths: Optional[List[Path]] = None,
     ) -> bool:
         """
         在 creator.xiaohongshu.com 发布一篇笔记。
@@ -558,7 +546,6 @@ class XHSUploader:
         else:
             logger.info(f"[上传] 图片数量: {len(image_paths)}")
 
-
         try:
             # ── 步骤 1：打开发布页，等待页面完整渲染 ──────────────────
             await page.goto(CREATOR_URL, wait_until="domcontentloaded", timeout=30000)
@@ -576,7 +563,8 @@ class XHSUploader:
             switched = False
 
             # 用 JS 找到可见且含关键字的 tab，直接在页面内点击（绕过 Playwright 的视口检测）
-            clicked = await page.evaluate(f"""
+            clicked = await page.evaluate(
+                f"""
                 () => {{
                     const tabs = Array.from(document.querySelectorAll('.creator-tab'));
                     for (const tab of tabs) {{
@@ -589,7 +577,8 @@ class XHSUploader:
                     }}
                     return null;
                 }}
-            """)
+            """
+            )
             if clicked:
                 await page.wait_for_timeout(1500)
                 logger.info(f"[上传] ✓ 已通过 JS 点击 tab: '{clicked}'")
@@ -670,9 +659,9 @@ class XHSUploader:
             # 实测：input.d-text，placeholder="填写标题会有更多赞哦"
             title_short = title[:20]
             title_input = (
-                await page.query_selector('input.d-text')
-                or await page.query_selector('input[placeholder*="填写标题"]')
-                or await page.query_selector('input[placeholder*="标题"]')
+                    await page.query_selector('input.d-text')
+                    or await page.query_selector('input[placeholder*="填写标题"]')
+                    or await page.query_selector('input[placeholder*="标题"]')
             )
             if title_input:
                 await title_input.click()
@@ -688,9 +677,9 @@ class XHSUploader:
             # 实测：div.tiptap.ProseMirror[contenteditable="true"]（ProseMirror 富文本）
             # ProseMirror 不支持 fill()，必须 click() 后用 keyboard.type()
             desc_input = (
-                await page.query_selector('div.tiptap.ProseMirror[contenteditable="true"]')
-                or await page.query_selector('div.ProseMirror[contenteditable="true"]')
-                or await page.query_selector('div.tiptap[contenteditable="true"]')
+                    await page.query_selector('div.tiptap.ProseMirror[contenteditable="true"]')
+                    or await page.query_selector('div.ProseMirror[contenteditable="true"]')
+                    or await page.query_selector('div.tiptap[contenteditable="true"]')
             )
             # 降级：找所有可见 contenteditable，取第一个非标题的
             if not desc_input:
@@ -724,8 +713,8 @@ class XHSUploader:
             logger.info("[上传] 等待媒体上传至服务器完成（轮询发布按钮）...")
 
             publish_btn = None
-            MAX_WAIT_ROUNDS = 25   # 最多等待轮数（视频文件可能较大）
-            WAIT_PER_ROUND = 12    # 每轮等待秒数（共最多 300 秒）
+            MAX_WAIT_ROUNDS = 25  # 最多等待轮数（视频文件可能较大）
+            WAIT_PER_ROUND = 12  # 每轮等待秒数（共最多 300 秒）
 
             for attempt in range(MAX_WAIT_ROUNDS):
                 # 找发布按钮：文字精确匹配"发布"，可见
@@ -739,10 +728,14 @@ class XHSUploader:
                         is_disabled = await btn.get_attribute("disabled")
                         if is_disabled is None:
                             publish_btn = btn
-                            logger.info(f"[上传] ✓ 找到可用发布按钮（第 {attempt+1} 轮，已等待 {attempt * WAIT_PER_ROUND} 秒）")
+                            logger.info(
+                                f"[上传] ✓ 找到可用发布按钮（第 {attempt + 1} 轮，已等待 {attempt * WAIT_PER_ROUND} 秒）"
+                            )
                         else:
                             found_disabled = True
-                            logger.info(f"[上传] 第 {attempt+1} 轮：发布按钮 disabled（上传中），等待 {WAIT_PER_ROUND} 秒...")
+                            logger.info(
+                                f"[上传] 第 {attempt + 1} 轮：发布按钮 disabled（上传中），等待 {WAIT_PER_ROUND} 秒..."
+                            )
                         break
 
                 if publish_btn:
@@ -750,9 +743,9 @@ class XHSUploader:
 
                 if not found_disabled and attempt > 0:
                     # 找不到任何发布按钮（可能页面异常），截图辅助排查
-                    logger.warning(f"[上传] 第 {attempt+1} 轮：未找到任何\"发布\"按钮，继续等待...")
+                    logger.warning(f"[上传] 第 {attempt + 1} 轮：未找到任何\"发布\"按钮，继续等待...")
                     if attempt % 5 == 4:  # 每 5 轮截一次图
-                        await _save_debug_screenshot(page, f"{title}_wait_{attempt+1}")
+                        await _save_debug_screenshot(page, f"{title}_wait_{attempt + 1}")
 
                 await page.wait_for_timeout(WAIT_PER_ROUND * 1000)
 
@@ -798,10 +791,10 @@ class XHSUploader:
             return False
 
     async def run_upload_session(
-        self,
-        notes: List[Dict],
-        dry_run: bool = False,
-        history: Optional[UploadHistory] = None,
+            self,
+            notes: List[Dict],
+            dry_run: bool = False,
+            history: Optional[UploadHistory] = None,
     ) -> Tuple[int, int]:
         """
         启动浏览器会话，批量上传笔记。
@@ -854,10 +847,12 @@ class XHSUploader:
             viewport={"width": 1280, "height": 900},
             locale="zh-CN",
         )
-        await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.chrome = {runtime: {}};
-        """)
+        await context.add_init_script(
+            """
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        window.chrome = {runtime: {}};
+                    """
+        )
 
         try:
             # 注入 Cookie
@@ -960,13 +955,13 @@ class XHSUploadScheduler:
     """上传调度器，支持单次和持续循环模式"""
 
     def __init__(
-        self,
-        download_dir: str = "downloads/xhs_monitor",
-        interval: int = 300,
-        cookie: str = "",
-        account_file: str = "",
-        run_once: bool = False,
-        dry_run: bool = False,
+            self,
+            download_dir: str = "downloads/xhs_monitor",
+            interval: int = 300,
+            cookie: str = "",
+            account_file: str = "",
+            run_once: bool = False,
+            dry_run: bool = False,
     ):
         load_dotenv()
 
@@ -1116,9 +1111,9 @@ async def main():
 
     # 下载目录：命令行 > .env XHS_UPLOAD_DIR > .env XHS_MONITOR_DIR > 默认值
     download_dir = (
-        args.dir
-        or os.getenv("XHS_UPLOAD_DIR", "")
-        or os.getenv("XHS_MONITOR_DIR", "downloads/xhs_monitor")
+            args.dir
+            or os.getenv("XHS_UPLOAD_DIR", "")
+            or os.getenv("XHS_MONITOR_DIR", "downloads/xhs_monitor")
     )
 
     # 间隔：命令行 > .env > 默认 300 秒

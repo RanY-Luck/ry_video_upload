@@ -27,7 +27,6 @@
 import argparse
 import asyncio
 import json
-import logging
 import os
 import re
 import sys
@@ -37,24 +36,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Set
 from dotenv import load_dotenv
+from Upload.utils.utils_common import setup_logging
+from XHS.xhs_downloader import XHSDownloader
 
 # 将 XHS 模块路径加入 Python 搜索路径（必须在 import XHSDownloader 之前）
 sys.path.insert(0, str(Path(__file__).parent / "XHS"))
-from XHS.xhs_downloader import XHSDownloader
 
-# ==========================================
-# 日志配置
-# ==========================================
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-logger = logging.getLogger("xhs_monitor")
-
+# 配置日志
+logger = setup_logging('logs/xhs_monitor.log')
 # ==========================================
 # 常量
 # ==========================================
@@ -71,7 +60,7 @@ class BarkNotifier:
 
     def __init__(self, bark_key: str = ""):
         self.bark_key = bark_key or os.getenv("BARK_KEY", "").strip()
-        self.base_url = "https://api.day.app"
+        self.base_url = os.getenv("BARK_SERVER", "").strip()
 
     def is_enabled(self) -> bool:
         return bool(self.bark_key)
@@ -218,10 +207,12 @@ class XHSBloggerMonitor:
             viewport={"width": 1280, "height": 900},
             locale="zh-CN",
         )
-        await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.chrome = {runtime: {}};
-        """)
+        await context.add_init_script(
+            """
+                        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+                        window.chrome = {runtime: {}};
+                    """
+        )
 
         # 注入 Cookie
         if self.cookie:
@@ -230,12 +221,14 @@ class XHSBloggerMonitor:
                 item = item.strip()
                 if "=" in item:
                     name, value = item.split("=", 1)
-                    cookies.append({
-                        "name": name.strip(),
-                        "value": value.strip(),
-                        "domain": ".xiaohongshu.com",
-                        "path": "/",
-                    })
+                    cookies.append(
+                        {
+                            "name": name.strip(),
+                            "value": value.strip(),
+                            "domain": ".xiaohongshu.com",
+                            "path": "/",
+                        }
+                    )
             if cookies:
                 await context.add_cookies(cookies)
                 logger.info(f"[浏览器] 已注入 {len(cookies)} 个 Cookie")
@@ -244,122 +237,126 @@ class XHSBloggerMonitor:
 
     async def _get_note_ids_from_dom(self, page) -> List[Dict]:
         """从页面 DOM 中提取笔记 ID 列表"""
-        card_infos = await page.evaluate("""
-            () => {
-                const results = [];
-                const seen = new Set();
-                const selectors = [
-                    'section.note-item a[href*="/explore/"]',
-                    'section.note-item a[href*="/discovery/item/"]',
-                    'div.note-item a[href*="/explore/"]',
-                    'a[href*="/explore/"]',
-                    'a[href*="/discovery/item/"]',
-                ];
-                for (const sel of selectors) {
-                    const links = document.querySelectorAll(sel);
-                    for (const a of links) {
-                        const href = a.href || '';
-                        const m = href.match(/\\/(explore|discovery\\/item)\\/([a-f0-9]+)/i);
-                        if (!m) continue;
-                        const noteId = m[2];
-                        if (seen.has(noteId)) continue;
-                        seen.add(noteId);
-                        const titleEl = a.querySelector('.title, .note-title, span, footer span');
-                        const title = (titleEl ? titleEl.textContent : '') || '';
-                        results.push({
-                            note_id: noteId,
-                            title: title.trim().substring(0, 100),
-                        });
-                    }
-                    if (results.length > 0) break;
-                }
-                return results;
-            }
-        """)
+        card_infos = await page.evaluate(
+            """
+                        () => {
+                            const results = [];
+                            const seen = new Set();
+                            const selectors = [
+                                'section.note-item a[href*="/explore/"]',
+                                'section.note-item a[href*="/discovery/item/"]',
+                                'div.note-item a[href*="/explore/"]',
+                                'a[href*="/explore/"]',
+                                'a[href*="/discovery/item/"]',
+                            ];
+                            for (const sel of selectors) {
+                                const links = document.querySelectorAll(sel);
+                                for (const a of links) {
+                                    const href = a.href || '';
+                                    const m = href.match(/\\/(explore|discovery\\/item)\\/([a-f0-9]+)/i);
+                                    if (!m) continue;
+                                    const noteId = m[2];
+                                    if (seen.has(noteId)) continue;
+                                    seen.add(noteId);
+                                    const titleEl = a.querySelector('.title, .note-title, span, footer span');
+                                    const title = (titleEl ? titleEl.textContent : '') || '';
+                                    results.push({
+                                        note_id: noteId,
+                                        title: title.trim().substring(0, 100),
+                                    });
+                                }
+                                if (results.length > 0) break;
+                            }
+                            return results;
+                        }
+                    """
+        )
         return card_infos or []
 
     async def _extract_note_content(self, page) -> Dict:
         """从当前打开的笔记详情页提取内容（图片/视频/文案）"""
-        return await page.evaluate("""
-            () => {
-                const result = {
-                    title: '',
-                    description: '',
-                    images: [],
-                    video: '',
-                    author: '',
-                };
-
-                // 提取标题
-                const titleEl = document.querySelector('#detail-title')
-                              || document.querySelector('.title')
-                              || document.querySelector('[class*="title"]');
-                if (titleEl) result.title = titleEl.textContent.trim();
-
-                // 提取文案描述
-                const descEl = document.querySelector('#detail-desc')
-                             || document.querySelector('.desc, .content, .note-text')
-                             || document.querySelector('[class*="desc"]');
-                if (descEl) result.description = descEl.textContent.trim();
-
-                // 提取图片 URL（包含多种来源）
-                const imgSelectors = [
-                    '.swiper-slide img[src]',
-                    '.carousel img[src]',
-                    '.note-image img[src]',
-                    '.media-container img[src]',
-                    'img[class*="note"][src]',
-                    '.slide-item img[src]',
-                ];
-                const imgSeen = new Set();
-                for (const sel of imgSelectors) {
-                    document.querySelectorAll(sel).forEach(img => {
-                        let src = img.src || img.getAttribute('data-src') || '';
-                        // 过滤掉头像等小图
-                        if (src && !imgSeen.has(src) && !src.includes('avatar') 
-                            && (src.includes('spectrum') || src.includes('ci.xiaohongshu') 
-                                || src.includes('xhscdn') || src.includes('sns-img'))) {
-                            imgSeen.add(src);
-                            result.images.push(src);
+        return await page.evaluate(
+            """
+                        () => {
+                            const result = {
+                                title: '',
+                                description: '',
+                                images: [],
+                                video: '',
+                                author: '',
+                            };
+            
+                            // 提取标题
+                            const titleEl = document.querySelector('#detail-title')
+                                          || document.querySelector('.title')
+                                          || document.querySelector('[class*="title"]');
+                            if (titleEl) result.title = titleEl.textContent.trim();
+            
+                            // 提取文案描述
+                            const descEl = document.querySelector('#detail-desc')
+                                         || document.querySelector('.desc, .content, .note-text')
+                                         || document.querySelector('[class*="desc"]');
+                            if (descEl) result.description = descEl.textContent.trim();
+            
+                            // 提取图片 URL（包含多种来源）
+                            const imgSelectors = [
+                                '.swiper-slide img[src]',
+                                '.carousel img[src]',
+                                '.note-image img[src]',
+                                '.media-container img[src]',
+                                'img[class*="note"][src]',
+                                '.slide-item img[src]',
+                            ];
+                            const imgSeen = new Set();
+                            for (const sel of imgSelectors) {
+                                document.querySelectorAll(sel).forEach(img => {
+                                    let src = img.src || img.getAttribute('data-src') || '';
+                                    // 过滤掉头像等小图
+                                    if (src && !imgSeen.has(src) && !src.includes('avatar') 
+                                        && (src.includes('spectrum') || src.includes('ci.xiaohongshu') 
+                                            || src.includes('xhscdn') || src.includes('sns-img'))) {
+                                        imgSeen.add(src);
+                                        result.images.push(src);
+                                    }
+                                });
+                            }
+            
+                            // 提取视频 URL
+                            const videoEl = document.querySelector('video source[src]')
+                                          || document.querySelector('video[src]');
+                            if (videoEl) {
+                                result.video = videoEl.src || videoEl.getAttribute('src') || '';
+                            }
+                            // 也尝试从 xgplayer 播放器提取
+                            if (!result.video) {
+                                const xgVideo = document.querySelector('.xgplayer video');
+                                if (xgVideo && xgVideo.src) result.video = xgVideo.src;
+                            }
+            
+                            // 提取作者名
+                            const authorEl = document.querySelector('.author-name, .username, [class*="author"] .name');
+                            if (authorEl) result.author = authorEl.textContent.trim();
+            
+                            return result;
                         }
-                    });
-                }
-
-                // 提取视频 URL
-                const videoEl = document.querySelector('video source[src]')
-                              || document.querySelector('video[src]');
-                if (videoEl) {
-                    result.video = videoEl.src || videoEl.getAttribute('src') || '';
-                }
-                // 也尝试从 xgplayer 播放器提取
-                if (!result.video) {
-                    const xgVideo = document.querySelector('.xgplayer video');
-                    if (xgVideo && xgVideo.src) result.video = xgVideo.src;
-                }
-
-                // 提取作者名
-                const authorEl = document.querySelector('.author-name, .username, [class*="author"] .name');
-                if (authorEl) result.author = authorEl.textContent.trim();
-
-                return result;
-            }
-        """)
+                    """
+        )
 
     async def _download_media(self, urls: List[str], save_dir: Path, title: str) -> int:
         """下载图片/视频文件"""
         downloaded = 0
         async with httpx.AsyncClient(
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.xiaohongshu.com/"},
-            timeout=30, follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.xiaohongshu.com/"},
+                timeout=30, follow_redirects=True,
         ) as client:
             for i, url in enumerate(urls):
                 if not url:
                     continue
-                
+
                 # 修复: 补全缺少协议的 URL (如 //sns-img-bd.xhscdn.com/...)
                 if url.startswith("//"):
                     url = "https:" + url
-                    
+
                 # 修复: httpx 无法下载 blob: URL，需跳过或使用备用方案
                 if url.startswith("blob:"):
                     logger.warning(f"[下载] ✗ 无法直接下载 blob URL (需使用 API 获取真实地址): {url}")
@@ -424,7 +421,7 @@ class XHSBloggerMonitor:
             logger.info(f"[浏览器] 启动 Chromium 检查博主 {self.user_id}...")
 
             await page.goto(user_profile_url, wait_until="domcontentloaded", timeout=40000)
-            await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(15000)
 
             # 滚动加载
             for _ in range(3):
@@ -448,12 +445,14 @@ class XHSBloggerMonitor:
 
             # 提取博主昵称
             try:
-                name = await page.evaluate("""
-                    () => {
-                        const el = document.querySelector('.user-name, .username, [class*="nickname"]');
-                        return el ? el.textContent.trim() : '';
-                    }
-                """)
+                name = await page.evaluate(
+                    """
+                                        () => {
+                                            const el = document.querySelector('.user-name, .username, [class*="nickname"]');
+                                            return el ? el.textContent.trim() : '';
+                                        }
+                                    """
+                )
                 if name and not self.author_name:
                     self.author_name = name
             except Exception:
@@ -519,7 +518,7 @@ class XHSBloggerMonitor:
                     current_url = page.url
                     logger.info(f"[处理] 导航后 URL: {current_url}")
 
-                    # 提取笔记内容
+                    # 提取 DOM 笔记内容 (作为备用降级方案)
                     content = await self._extract_note_content(page)
 
                     note_title = content.get("title", "") or title or note_id
@@ -528,10 +527,51 @@ class XHSBloggerMonitor:
                     note_video = content.get("video", "")
                     note_author = content.get("author", "") or label
 
+                    # --------------------------
+                    # 引入 API 获取高清原图/原生视频
+                    # --------------------------
+                    media_urls = []
+                    logger.info(f"[API提取] 正在尝试通过官方接口提取高清无水印内容...")
+                    try:
+                        # get_info 利用内置 xsec_token 能力发起高权限无水印 API 请求
+                        api_info = await self.downloader.get_info(current_url)
+                        if api_info and api_info.download_urls:
+                            logger.info(f"[API提取] ✓ 成功获取 {len(api_info.download_urls)} 个高清媒体直链")
+                            media_urls = api_info.download_urls
+                            # 可选：用 API 提取的更清晰信息覆盖 DOM 抓取的内容
+                            note_title = api_info.title or note_title
+                            note_desc = api_info.description or note_desc
+                            note_author = api_info.author_name or note_author
+                        else:
+                            logger.warning(f"[API提取] ✗ 获取失败或无直链，将降级使用 DOM 抓取的媒体。")
+                    except Exception as e:
+                        logger.error(f"[API提取] 发生异常: {e}，将降级使用 DOM 抓取的媒体。")
+
+                    # 如果 API 没取到（media_urls 为空），降级使用原有的 DOM 抓取逻辑
+                    if not media_urls:
+                        # 处理 blob视频 (从 API 中获取真实下载链接)
+                        if note_video and note_video.startswith("blob:"):
+                            logger.info(f"[转换] 视频是 blob 链接，正调用 API 提取真实地址: {note_id}")
+                            try:
+                                video_info = await self.downloader.get_info(current_url)
+                                if video_info and video_info.download_urls:
+                                    note_video = video_info.download_urls[0]
+                                    logger.info(f"[转换] 成功获取真实视频地址: {note_video[:50]}...")
+                                else:
+                                    logger.warning("[转换] 无法通过 API 获取真实视频地址")
+                                    note_video = ""
+                            except Exception as e:
+                                logger.error(f"[转换] 提取真实视频地址失败: {e}")
+                                note_video = ""
+
+                        if note_video:
+                            media_urls.append(note_video)
+                        media_urls.extend(note_images)
+
                     logger.info(
-                        f"[提取] 标题: {note_title[:30]} | "
-                        f"图片: {len(note_images)} | "
-                        f"视频: {'✓' if note_video else '✗'} | "
+                        f"[提取总结] 标题: {note_title[:30]} | "
+                        f"作者: {note_author} | "
+                        f"待下载媒体数: {len(media_urls)} | "
                         f"文案: {len(note_desc)} 字"
                     )
 
@@ -553,27 +593,7 @@ class XHSBloggerMonitor:
                     )
                     text_file.write_text(text_content, encoding="utf-8")
 
-                    # 处理 blob视频 (从 API 中获取真实下载链接)
-                    if note_video and note_video.startswith("blob:"):
-                        logger.info(f"[转换] 视频是 blob 链接，正调用 API 提取真实地址: {note_id}")
-                        try:
-                            video_info = await self.downloader.get_info(current_url)
-                            if video_info and video_info.download_urls:
-                                note_video = video_info.download_urls[0]
-                                logger.info(f"[转换] 成功获取真实视频地址: {note_video[:50]}...")
-                            else:
-                                logger.warning("[转换] 无法通过 API 获取真实视频地址")
-                                note_video = ""
-                        except Exception as e:
-                            logger.error(f"[转换] 提取真实视频地址失败: {e}")
-                            note_video = ""
-
                     # 下载媒体文件
-                    media_urls = []
-                    if note_video:
-                        media_urls.append(note_video)
-                    media_urls.extend(note_images)
-
                     if media_urls:
                         dl_count = await self._download_media(media_urls, save_dir, safe_title)
                         logger.info(f"[下载] 媒体下载完成: {dl_count}/{len(media_urls)}")
