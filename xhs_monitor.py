@@ -144,6 +144,9 @@ class XHSBloggerMonitor:
         # 内存中的已知笔记集合
         self._seen_ids: Set[str] = self._load_seen_ids()
 
+        # Cookie 存储文件，用于免登录
+        self.storage_state_file = self.download_dir / ".xhs_storage_state.json"
+
         logger.info(f"[初始化] 博主 {self.user_id}，已知笔记数: {len(self._seen_ids)}")
 
     @staticmethod
@@ -198,15 +201,22 @@ class XHSBloggerMonitor:
                 "--window-size=1280,900",
             ],
         )
-        context = await browser.new_context(
-            user_agent=(
+        context_args = {
+            "user_agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
-            viewport={"width": 1280, "height": 900},
-            locale="zh-CN",
-        )
+            "viewport": {"width": 1280, "height": 900},
+            "locale": "zh-CN",
+        }
+
+        has_state = hasattr(self, 'storage_state_file') and self.storage_state_file.exists()
+        # 尝试加载持久化的登录状态
+        if has_state:
+            context_args["storage_state"] = str(self.storage_state_file)
+            
+        context = await browser.new_context(**context_args)
         await context.add_init_script(
             """
                         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -214,8 +224,9 @@ class XHSBloggerMonitor:
                     """
         )
 
-        # 注入 Cookie
-        if self.cookie:
+        # 只有在没有本地缓存状态时，才注入从 .env 解析旧的 Cookie
+        # (避免旧的 Cookie 覆盖掉持久化的最新 Cookie 导致每次都要重新登录)
+        if self.cookie and not has_state:
             cookies = []
             for item in self.cookie.split(";"):
                 item = item.strip()
@@ -433,15 +444,27 @@ class XHSBloggerMonitor:
             logger.info(f"[DOM] 共发现 {len(card_infos)} 条笔记")
 
             if not card_infos:
-                logger.warning("[检查] 未获取到任何笔记，可能是登录失效或博主无内容")
-                # 截图调试
-                debug_path = str(self.download_dir / f"debug_{self.user_id}.png")
-                try:
-                    await page.screenshot(path=debug_path, full_page=True)
-                    logger.warning(f"[调试] 已保存页面截图: {debug_path}")
-                except Exception:
-                    pass
-                return 0
+                logger.warning("[检查] 页面未加载出任何笔记，可能是需要登录或进行滑块验证。")
+                logger.warning("[检查] 请在弹出的浏览器界面中完成操作... (等待最高 60 秒)")
+                
+                # 等待用户手工干预长达 60 秒
+                for _ in range(30):
+                    await asyncio.sleep(2)
+                    card_infos = await self._get_note_ids_from_dom(page)
+                    if card_infos:
+                        logger.info("[检查] ✓ 成功检测到笔记并继续执行！")
+                        break
+                        
+                if not card_infos:
+                    logger.warning("[检查] 仍未获取到任何笔记。如果是该博主本来就没有内容请忽略；如果页面仍然卡在登录，请在下一轮重试。")
+                    # 截图调试
+                    debug_path = str(self.download_dir / f"debug_{self.user_id}.png")
+                    try:
+                        await page.screenshot(path=debug_path, full_page=True)
+                        logger.warning(f"[调试] 已保存页面截图: {debug_path}")
+                    except Exception:
+                        pass
+                    return 0
 
             # 提取博主昵称
             try:
@@ -634,6 +657,13 @@ class XHSBloggerMonitor:
             import traceback
             traceback.print_exc()
         finally:
+            # 在关闭前保存 context 的 storage state (Cookie, Local Storage 等)
+            try:
+                if context:
+                    await context.storage_state(path=str(self.storage_state_file))
+            except Exception as e:
+                logger.warning(f"[浏览器] 保存 Cookie 状态失败: {e}")
+
             try:
                 await browser.close()
             except Exception:
