@@ -697,8 +697,21 @@ class XHSUploader:
                 await page.wait_for_timeout(300)
                 full_desc = description if description else title
                 # ProseMirror 需要用 keyboard.type 而非 fill
-                await page.keyboard.type(full_desc, delay=30)
-                logger.info(f"[上传] ✓ 已填写正文 ({len(full_desc)} 字)")
+                # 提取标签并进行特殊处理以确保标签被正确选中
+                parts = re.split(r'(#[^\s#\n，。？！；：.,?!;:]+)', full_desc)
+                for part in parts:
+                    if not part:
+                        continue
+                    if part.startswith('#'):
+                        await page.keyboard.type(part, delay=50)
+                        await page.wait_for_timeout(800)  # 等待标签联想框
+                        await page.keyboard.press("Enter") # 回车选中标签
+                        await page.wait_for_timeout(200)
+                        await page.keyboard.press("Space") # 中间加个空格
+                        await page.wait_for_timeout(200)
+                    else:
+                        await page.keyboard.type(part, delay=30)
+                logger.info(f"[上传] ✓ 已填写正文 ({len(full_desc)} 字)，并处理了标签")
             else:
                 logger.warning("[上传] 未找到正文输入框，跳过")
 
